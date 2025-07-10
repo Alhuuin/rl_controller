@@ -24,11 +24,16 @@ robots:
   ground:
     module: "env/ground"
 
+# Collision constraint
+collisions:
+- type: collision
+  useMinimal: true
+
 # Basic constraints
-constraints:
-  # - type: "contact"
-  - type: "dynamics"
-    damper: [0.1, 0.01, 0.5]
+# constraints:
+#   # - type: "contact"
+#   - type: "dynamics
+#     damper: [0.1, 0.01, 0.5]
   # - type: "compoundJoint"
 
 # Initial contacts (both feet on ground)
@@ -41,12 +46,6 @@ constraints:
 #     r2: "ground"
 #     r1Surface: "RightFootCenter" 
 #     r2Surface: "AllGround"
-
-# H1 robot specific settings
-h1:
-  posture:
-    stiffness: 1.0
-    weight: 10.0
 
 # RL Controller specific configuration
 policy_path: "policy.onnx"  # Your ONNX policy file in the controller root directory
@@ -72,21 +71,44 @@ transitions:
 # init: "RLController_Initial" 
 init: "RLExecution" 
 
+# ObserverPipelines:
+# - name: MainPipeline                     # - Create a new pipeline
+#   gui: true                              #   diplay the pipeline in the GUI (default = false)
+#   log: true                              #   log observers (default)
+
+#   observers:                             #   declare which observers to use
+#   - type: Encoder                        # - Use an EncoderObserver
+#     config:                              #
+#       position: encoderValues            #    - Sets joint position from encoder sensor values (default)
+#       velocity: encoderFiniteDifferences #    - Computes joint velocities by finite differences  (default)
+#                                          # We now have the estimation of each joint position and velocity and the corresponding
+#                                          # body positions and velocities, but we are still missing the floating base
+
+#   - type: BodySensor                     # - Use a BodySensor observer
+#     update: false                        #   Do not update the real robot state
+#     gui: false                           #   Do not display in the gui
+#     config:                              #
+#       bodySensor: FloatingBase
+
 ObserverPipelines:
-- name: MainPipeline                     # - Create a new pipeline
-  gui: true                              #   diplay the pipeline in the GUI (default = false)
-  log: true                              #   log observers (default)
+  name: "Pipeline"
+  gui: true
+  observers:
+    - type: Encoder
+      config:
+          velocity: encoderVelocities
+    
+    - type: Attitude
+      required: true
+      update: true
 
-  observers:                             #   declare which observers to use
-  - type: Encoder                        # - Use an EncoderObserver
-    config:                              #
-      position: encoderValues            #    - Sets joint position from encoder sensor values (default)
-      velocity: encoderFiniteDifferences #    - Computes joint velocities by finite differences  (default)
-                                         # We now have the estimation of each joint position and velocity and the corresponding
-                                         # body positions and velocities, but we are still missing the floating base
+    - type: KinematicInertial              # - Estimates the floating base state using the KinematicInertial observer
+      update: true                         #   update the real robot instance from its results
+      gui: true                            #   Displays the estimated velocity as an arrow (default)
+      config:
+        imuBodySensor: Accelerometer
 
-  - type: BodySensor                     # - Use a BodySensor observer
-    update: false                        #   Do not update the real robot state
-    gui: false                           #   Do not display in the gui
-    config:                              #
-      bodySensor: FloatingBase
+    - type: BodySensor
+      update: true
+      config:
+        bodySensor: FloatingBase

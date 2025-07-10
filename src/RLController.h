@@ -2,7 +2,8 @@
 
 #include <mc_control/mc_controller.h>
 #include <mc_control/fsm/Controller.h>
-#include <mc_tasks/TorqueTask.h>
+// #include <mc_tasks/TorqueTask.h>
+#include <mc_tasks/PostureTask.h>
 #include "RLPolicyInterface.h"
 #include <memory>
 #include <Eigen/Dense>
@@ -22,7 +23,8 @@ struct RLController : public mc_control::fsm::Controller
   void reset(const mc_control::ControllerResetData & reset_data) override;
   
   std::unique_ptr<RLPolicyInterface> rlPolicy_;
-  std::shared_ptr<mc_tasks::TorqueTask> torqueTask_;
+  // std::shared_ptr<mc_tasks::TorqueTask> torqueTask_;
+  std::shared_ptr<mc_tasks::PostureTask> postureTask_;
   
   std::vector<std::string> allJoints_;      // All 19 joints in mc_rtc order
   std::vector<std::string> legJoints_;      // 10 leg joints only
@@ -73,6 +75,8 @@ struct RLController : public mc_control::fsm::Controller
   { 
     out = {"h1"}; 
   }
+
+  std::unique_ptr<mc_solver::ContactConstraint> contactConstraintTest;
 
 private:
   void initializeAllJoints();

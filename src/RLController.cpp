@@ -6,9 +6,21 @@
 
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, 
                            const mc_rtc::Configuration & config)
-: mc_control::fsm::Controller(rm, dt, config)
+: mc_control::fsm::Controller(rm, dt, config, Backend::TVM)
 {
-  datastore().make<std::string>("ControlMode", "Torque");
+  // Add constraints
+  // contactConstraintTest =std::make_unique<mc_solver::ContactConstraint>(timeStep, mc_solver::ContactConstraint::ContactType::Acceleration);
+  // solver().addConstraintSet(contactConstraintTest);
+
+  // selfCollisionConstraint->setCollisionsDampers(solver(), {1.8, 70.0});
+  
+  // dynamicsConstraint = mc_rtc::unique_ptr<mc_solver::DynamicsConstraint>(
+  //     new mc_solver::DynamicsConstraint(
+  //         robots(), 0, {0.1, 0.01, 0.0, 1.8, 70.0}, 0.9, true));
+  // solver().addConstraintSet(dynamicsConstraint);
+
+  solver().removeTask(getPostureTask(robot().name()));
+  // datastore().make<std::string>("ControlMode", "Torque");
   mc_rtc::log::success("RLController init");
 }
 
@@ -20,8 +32,8 @@ RLController::~RLController()
 
 bool RLController::run()
 {
-  // return mc_control::fsm::Controller::run();
-  return mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
+  return mc_control::fsm::Controller::run();
+  // return mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
 }
 
 void RLController::reset(const mc_control::ControllerResetData & reset_data)
@@ -54,8 +66,14 @@ void RLController::reset(const mc_control::ControllerResetData & reset_data)
     rlPolicy_ = std::make_unique<RLPolicyInterface>();
   }
   
-  torqueTask_ = std::make_shared<mc_tasks::TorqueTask>(solver(), 0, 1000.0);
-  solver().addTask(torqueTask_);
+  // torqueTask_ = std::make_shared<mc_tasks::TorqueTask>(solver(), 0, 1000.0);
+  // solver().addTask(torqueTask_);
+  
+  postureTask_ = std::make_shared<mc_tasks::PostureTask>(
+      solver(), robot().robotIndex(), 1, 1);
+  postureTask_->weight(10.0);
+  postureTask_->stiffness(100.0);
+  solver().addTask(postureTask_);
   
   if(useAsyncInference_)
   {
@@ -266,7 +284,7 @@ void RLController::applyAction(const Eigen::VectorXd & action)
     }
   }
   
-  Eigen::VectorXd desiredTorques = computeImpedanceTorques(reorderedAction, currentPos, currentVel);
+  // Eigen::VectorXd desiredTorques = computeImpedanceTorques(reorderedAction, currentPos, currentVel);
   
   std::map<std::string, std::vector<double>> torqueMap;
   for(size_t i = 0; i < 10; ++i)
@@ -275,11 +293,12 @@ void RLController::applyAction(const Eigen::VectorXd & action)
       mc_rtc::log::error("Trying to access legjoint[{}] but size is {}", i, 10);
       break;
     }
-    mc_rtc::log::info("Adding torque for joint {} ({}): {}", i, allJoints_[i], desiredTorques(i));
-    torqueMap[allJoints_[i]] = {desiredTorques(i)};
+    mc_rtc::log::info("Adding pos for joint {} ({}): {}", i, allJoints_[i], reorderedAction(i));
+    torqueMap[allJoints_[i]] = {reorderedAction(i)};
   }
   mc_rtc::log::info("========================================================================");
-  torqueTask_->target(torqueMap);
+  // torqueTask_->target(torqueMap);
+  postureTask_->target(torqueMap);
 }
 
 Eigen::VectorXd RLController::computeImpedanceTorques(const Eigen::VectorXd & desiredPos, 

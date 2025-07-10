@@ -32,11 +32,11 @@ void RLExecution::start(mc_control::fsm::Controller & ctl_)
     return;
   }
   
-  if(!ctl.torqueTask_)
-  {
-    mc_rtc::log::error("TorqueTask not available in RLExecution state");
-    return;
-  }
+  // if(!ctl.torqueTask_)
+  // {
+  //   mc_rtc::log::error("TorqueTask not available in RLExecution state");
+  //   return;
+  // }
   
   mc_rtc::log::success("RLExecution state initialization completed");
   
