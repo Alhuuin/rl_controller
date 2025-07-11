@@ -20,7 +20,8 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   // solver().addConstraintSet(dynamicsConstraint);
 
   solver().removeTask(getPostureTask(robot().name()));
-  // datastore().make<std::string>("ControlMode", "Torque");
+
+  datastore().make<std::string>("ControlMode", "Torque");
   mc_rtc::log::success("RLController init");
 }
 
@@ -32,8 +33,8 @@ RLController::~RLController()
 
 bool RLController::run()
 {
-  return mc_control::fsm::Controller::run();
-  // return mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
+  // return mc_control::fsm::Controller::run();
+  return mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
 }
 
 void RLController::reset(const mc_control::ControllerResetData & reset_data)
@@ -67,11 +68,8 @@ void RLController::reset(const mc_control::ControllerResetData & reset_data)
   }
   
   // torqueTask_ = std::make_shared<mc_tasks::TorqueTask>(solver(), 0, 1000.0);
-  // solver().addTask(torqueTask_);
-  
-  postureTask_ = std::make_shared<mc_tasks::PostureTask>(
+  postureTask_ =  std::make_shared<mc_tasks::PostureTask>(
       solver(), robot().robotIndex(), 1, 1);
-  postureTask_->weight(10.0);
   postureTask_->stiffness(100.0);
   solver().addTask(postureTask_);
   
@@ -297,7 +295,6 @@ void RLController::applyAction(const Eigen::VectorXd & action)
     torqueMap[allJoints_[i]] = {reorderedAction(i)};
   }
   mc_rtc::log::info("========================================================================");
-  // torqueTask_->target(torqueMap);
   postureTask_->target(torqueMap);
 }
 
