@@ -93,6 +93,10 @@ struct RLController : public mc_control::fsm::Controller
   Eigen::VectorXd a_before_vector;             // Last actions applied (19 joints in mc_rtc order)
   Eigen::VectorXd a_vector;                    // Action in mc_rtc order
   
+  // CSV data storage
+  std::vector<Eigen::VectorXd> csvInputData_;  // Stores parsed CSV input data for each inference step
+  std::atomic<int> inferenceCounter_;          // Thread-safe inference counter for CSV indexing
+  
   // 40Hz inference timing
   std::chrono::steady_clock::time_point lastInferenceTime_;
   Eigen::VectorXd q_rl_vector;  // Hold target position between inference calls
@@ -160,5 +164,6 @@ struct RLController : public mc_control::fsm::Controller
 
 private:
   void initializeAllJoints();
+  void loadCSVInputData();  // Parse and store all CSV input data during initialization
   // void initializeImpedanceGains();
 }; 

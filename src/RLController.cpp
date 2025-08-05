@@ -4,6 +4,8 @@
 #include <mc_rtc/logging.h>
 #include <mc_rbdyn/configuration_io.h>
 #include <chrono>
+#include <fstream>
+#include <sstream>
 
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, 
                            const mc_rtc::Configuration & config)
@@ -137,6 +139,7 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   shouldStopInference_ = false;
   newObservationAvailable_ = false;
   newActionAvailable_ = false;
+  inferenceCounter_ = 0;  // Initialize inference counter
   currentObservation_ = Eigen::VectorXd::Zero(35);
   currentAction_ = Eigen::VectorXd::Zero(dofNumber);
   latestAction_ = Eigen::VectorXd::Zero(dofNumber);
@@ -162,6 +165,12 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   }
 
   logging();
+
+  // Load CSV input data during initialization
+  loadCSVInputData();
+
+  mc_rtc::log::warning(csvInputData_[160]);
+  
 
   mc_rtc::log::success("RLController init");
 }
@@ -549,6 +558,13 @@ Eigen::VectorXd RLController::getCurrentObservation()
     }
   }
   obs.segment(25, 10) = legAction;
+
+  // Get the observation from CSV using thread-safe counter
+  if(!csvInputData_.empty()) {
+    int currentCounter = inferenceCounter_.load();
+    obs = csvInputData_[currentCounter % 297];
+  }
+
   return obs;
 }
 
@@ -567,6 +583,8 @@ void RLController::applyAction(const Eigen::VectorXd & action)
   bool shouldRunInference = timeSinceLastInference.count() >= INFERENCE_PERIOD_MS;
   
   if(shouldRunInference) {
+    mc_rtc::log::warning(shouldRunInference);
+    
     // Get current observation for logging
     Eigen::VectorXd currentObs = getCurrentObservation();
     
@@ -605,13 +623,10 @@ void RLController::applyAction(const Eigen::VectorXd & action)
     // Update timing
     lastInferenceTime_ = currentTime;
     targetPositionValid_ = true;
-    
-    // Detailed logging for policy input/output comparison
-    static int inferenceCounter = 0;
-    inferenceCounter++;
+
     
     // if(inferenceCounter % 10 == 0) { // Log every 10 inferences (0.25 seconds at 40Hz)
-    mc_rtc::log::info("=== RLController Policy I/O Inference #{} ===", inferenceCounter);
+    mc_rtc::log::info("=== RLController Policy I/O Inference #{} === ", inferenceCounter_.load());
     mc_rtc::log::info("Policy Input (35 obs): [");
     for(int i = 0; i < 35; ++i) {
       mc_rtc::log::info("  [{}]: {:.6f}", i, currentObs(i));
@@ -632,12 +647,10 @@ void RLController::applyAction(const Eigen::VectorXd & action)
       mc_rtc::log::info("  [{}]: {:.6f}", i, q_rl_vector(i));
     }
     mc_rtc::log::info("]");
-    // mc_rtc::log::info("Reference Position q_ref (dofNumber): [");
-    // for(int i = 0; i < dofNumber; ++i) {
-    //   mc_rtc::log::info("  [{}]: {:.6f}", i, q_ref_(i));
-    // }
-    // mc_rtc::log::info("]");
     mc_rtc::log::info("=== End Policy I/O ===");
+
+
+    inferenceCounter_++;
   }
   
   // Always apply impedance control at mc_rtc frequency using current target position
@@ -739,8 +752,25 @@ void RLController::inferenceThreadFunction()
 }
 
 void RLController::updateObservationForInference()
-{
+{ 
   Eigen::VectorXd obs = getCurrentObservation();
+  // Get CSV input data for this inference step using thread-safe counter
+  Eigen::VectorXd csvInput;
+  if(!csvInputData_.empty()) {
+    int currentCounter = inferenceCounter_.load();
+    csvInput = csvInputData_[currentCounter % 297];
+
+    // Log CSV input if available
+    if(csvInput.size() > 0) {
+      mc_rtc::log::info("CSV Input Array (size {}): [", csvInput.size());
+      for(int i = 0; i < csvInput.size(); ++i) {
+        mc_rtc::log::info("  [{}]: {:.6f}", i, csvInput(i));
+      }
+      mc_rtc::log::info("]");
+    }
+
+    obs = csvInput;
+  }
   
   //update shared observation
   {
@@ -821,5 +851,131 @@ void RLController::torqueTaskSimulation(Eigen::VectorXd & currentTargetPosition)
 
   // mc_rtc::log::info("[RLController] refAccel: {}", refAccel);
   similiTorqueTask->refAccel(refAccel);
+}
+
+void RLController::loadCSVInputData()
+{
+  std::ifstream file("eval_policy_io.csv");
+  if(!file.is_open()) {
+    mc_rtc::log::warning("Cannot open CSV file 'eval_policy_io.csv', CSV input data will be empty");
+    return;
+  }
+  
+  std::string line;
+  std::vector<std::string> headers;
+  int input_col = -1;
+
+  // Read header
+  if(std::getline(file, line))
+  {
+    std::stringstream ss(line);
+    std::string col;
+    while(std::getline(ss, col, ','))
+    {
+      // Trim whitespace from column header
+      col.erase(0, col.find_first_not_of(" \t\r\n"));
+      col.erase(col.find_last_not_of(" \t\r\n") + 1);
+      headers.push_back(col);
+      if(col == "input") input_col = headers.size() - 1;
+    }
+    
+    if(input_col == -1) {
+      mc_rtc::log::warning("Column 'input' not found in CSV file, CSV input data will be empty");
+      return;
+    }
+  }
+  else
+  {
+    mc_rtc::log::warning("Cannot read header from CSV file, CSV input data will be empty");
+    return;
+  }
+
+  // Parse all data lines
+  int line_number = 1; // Start from line 1 (after header)
+  while(std::getline(file, line))
+  {
+    // Parse CSV line properly handling quoted fields
+    std::vector<std::string> csv_cells;
+    std::string current_cell;
+    bool in_quotes = false;
+    
+    for(size_t i = 0; i < line.length(); ++i) {
+      char c = line[i];
+      if(c == '"') {
+        in_quotes = !in_quotes;
+      } else if(c == ',' && !in_quotes) {
+        csv_cells.push_back(current_cell);
+        current_cell.clear();
+      } else {
+        current_cell += c;
+      }
+    }
+    csv_cells.push_back(current_cell); // Add the last cell
+    
+    // Parse the input column
+    if(input_col < csv_cells.size()) {
+      std::string input_str = csv_cells[input_col];
+      
+      // Remove surrounding quotes if present
+      if(!input_str.empty() && input_str.front() == '"') {
+        input_str = input_str.substr(1);
+      }
+      if(!input_str.empty() && input_str.back() == '"') {
+        input_str.pop_back();
+      }
+      
+      std::vector<double> temp_values;
+      if(!input_str.empty()) {
+        // Parse entries like "[0]: 0.139669, [1]: -0.032801, ..."
+        std::stringstream value_ss(input_str);
+        std::string token;
+        
+        while(std::getline(value_ss, token, ',')) {
+          // Trim whitespace
+          token.erase(0, token.find_first_not_of(" \t"));
+          token.erase(token.find_last_not_of(" \t") + 1);
+          
+          // Find the colon separator
+          size_t colon_pos = token.find(':');
+          if(colon_pos != std::string::npos && colon_pos + 1 < token.length()) {
+            // Extract the value after the colon
+            std::string value_str = token.substr(colon_pos + 1);
+            
+            // Trim whitespace from the value
+            value_str.erase(0, value_str.find_first_not_of(" \t"));
+            value_str.erase(value_str.find_last_not_of(" \t") + 1);
+            
+            if(!value_str.empty()) {
+              try {
+                double parsed_value = std::stod(value_str);
+                temp_values.push_back(parsed_value);
+              } catch(const std::exception&) {
+                // Ignore parsing errors silently
+              }
+            }
+          }
+        }
+      }
+      
+      // Convert to Eigen::VectorXd and store
+      if(!temp_values.empty()) {
+        Eigen::VectorXd input_vector = Eigen::Map<Eigen::VectorXd>(temp_values.data(), temp_values.size());
+        csvInputData_.push_back(input_vector);
+      } else {
+        // Add empty vector for this line
+        csvInputData_.push_back(Eigen::VectorXd::Zero(0));
+      }
+    } else {
+      // Add empty vector if column not found
+      csvInputData_.push_back(Eigen::VectorXd::Zero(0));
+    }
+    
+    line_number++;
+  }
+  
+  mc_rtc::log::info("Loaded {} lines of CSV input data", csvInputData_.size());
+  if(!csvInputData_.empty() && csvInputData_[0].size() > 0) {
+    mc_rtc::log::info("First input vector has {} elements", csvInputData_[0].size());
+  }
 }
 
