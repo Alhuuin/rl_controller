@@ -300,39 +300,31 @@ bool RLController::run()
     Eigen::MatrixXd Kp_inv = kp_vector.cwiseInverse().asDiagonal();
 
     q_cmd = currentPos + Kp_inv*(M*ddot_qp + Cg + kd_vector.cwiseProduct(currentVel)); // Inverse PD control to get the commanded position <=> RL position control
-
-    tau_cmd_after_pd = kd_vector.cwiseProduct(currentPos - q_cmd) - kd_vector.cwiseProduct(currentVel); // PD control to get the commanded position after PD control
     
     auto q = robot().mbc().q;
-    
-    size_t i = 0;
-    for (const auto &joint_name : jointNames)
-    {
-      q[robot().jointIndexByName(joint_name)][0] = q_cmd[i];
-      i++;
-    }
-
-    robot().mbc().q = q; // Update the mbc with the new position
 
     if (useQP)
-      return run;
-    else
     {
-      auto q = robot().encoderValues();
-      currentPos = Eigen::VectorXd::Map(q.data(), q.size());
-      auto vel = robot().encoderVelocities();
-      currentVel = Eigen::VectorXd::Map(vel.data(), vel.size());
-      auto tau = robot().mbc().jointTorque;
-      tau_d = kp_vector.cwiseProduct(q_zero_vector - currentPos) + kd_vector.cwiseProduct(-currentVel);
-      
       size_t i = 0;
       for (const auto &joint_name : jointNames)
       {
-        tau[robot().jointIndexByName(joint_name)][0] = tau_d[i];
+        q[robot().jointIndexByName(joint_name)][0] = q_cmd[i];
         i++;
       }
 
-      robot().mbc().jointTorque = tau; // Update the mbc with the new position
+      robot().mbc().q = q; // Update the mbc with the new position
+      return run;
+    }
+    else
+    {
+      size_t i = 0;
+      for (const auto &joint_name : jointNames)
+      {
+        q[robot().jointIndexByName(joint_name)][0] = q_rl_vector[i];
+        i++;
+      }
+
+      robot().mbc().q = q; // Update the mbc with the new position
       return true;
     }
 
