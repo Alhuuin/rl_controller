@@ -121,6 +121,17 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   phaseFreq_ = 1.2;  // Phase frequency in Hz
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
   
+  // Initialize external force application (hardcoded for testing)
+  externalForceEnabled_ = false;
+  pelvisForceEnabled_ = false;
+  pelvisForce_ = Eigen::Vector3d(0.0, 0.10, -100.0);  // Default 100N downward force for testing
+  mc_rtc::log::info("[RLController] External force application initialized with test force: [{:.1f}, {:.1f}, {:.1f}] N", 
+                   pelvisForce_.x(), pelvisForce_.y(), pelvisForce_.z());
+  mc_rtc::log::info("[RLController] Robot name: '{}', Available bodies:", robot().name());
+  for(const auto & body : robot().mb().bodies()) {
+    mc_rtc::log::info("[RLController]   Body: '{}'", body.name());
+  }
+  
   std::string policyPath = config("policy_path", std::string(""));
   if(!policyPath.empty())
   {
@@ -225,8 +236,62 @@ void RLController::logging()
   logger().addLogEntry("RLController_cmd", [this]() { return cmd_; });
   logger().addLogEntry("RLController_phase", [this]() { return phase_; });
 
+  // External force logging
+  logger().addLogEntry("RLController_pelvisForceEnabled", [this]() { return pelvisForceEnabled_; });
+  logger().addLogEntry("RLController_pelvisForce", [this]() { return pelvisForce_; });
+
   gui()->addElement({"FSM", "Options"},
-  mc_rtc::gui::Checkbox("External torques", compensateExternalForces));
+    mc_rtc::gui::Checkbox("External torques", compensateExternalForces));
+  
+  // Add external force controls
+  gui()->addElement({"FSM", "External Forces"},
+    mc_rtc::gui::Button("Debug Force Interface", 
+      [this]() { 
+        mc_rtc::log::info("[RLController] === Force Interface Debug ===");
+        mc_rtc::log::info("[RLController] Robot name: '{}'", robot().name());
+        
+        // Check for mc_mujoco interface
+        std::string call_name = robot().name() + "::ApplyForcesOnBody";
+        bool has_interface = datastore().has(call_name);
+        mc_rtc::log::info("[RLController] mc_mujoco interface '{}': {}", call_name, has_interface ? "AVAILABLE" : "NOT FOUND");
+        
+        // List robot bodies
+        mc_rtc::log::info("[RLController] Robot bodies:");
+        for(const auto & body : robot().mb().bodies()) {
+          mc_rtc::log::info("[RLController]   - '{}'", body.name());
+        }
+        
+        // Test force application
+        if(has_interface) {
+          mc_rtc::log::info("[RLController] Testing force application...");
+          const sva::ForceVecd test_wrench(Eigen::Vector3d::Zero(), Eigen::Vector3d(0, 0, -100));
+          try {
+            const std::string body_name = "pelvis";  // Use const std::string& 
+            // Pass Eigen::Vector3d by value (copy constructor)
+            Eigen::Vector3d localPos(0, 0, 0);  // Create variable, not temporary
+            bool success = datastore().call<bool>(call_name, body_name, test_wrench, std::move(localPos));
+            mc_rtc::log::info("[RLController] Force application test: {}", success ? "SUCCESS" : "FAILED");
+          } catch(const std::exception & e) {
+            mc_rtc::log::error("[RLController] Force application test EXCEPTION: {}", e.what());
+          }
+        }
+        mc_rtc::log::info("[RLController] === End Debug ===");
+      }));
+      
+  gui()->addElement({"FSM", "External Forces"},
+    mc_rtc::gui::Button("Toggle Pelvis Force", 
+      [this]() { 
+        pelvisForceEnabled_ = !pelvisForceEnabled_;
+        mc_rtc::log::info("[RLController] Pelvis force {}", pelvisForceEnabled_ ? "enabled" : "disabled");
+      }));
+      
+  gui()->addElement({"FSM", "External Forces"},
+    mc_rtc::gui::Button("Apply 100N Down Force", 
+      [this]() { 
+        pelvisForce_ = Eigen::Vector3d(0, 0, -100);
+        applyPelvisForce();
+        mc_rtc::log::info("[RLController] Applied 100N downward force to pelvis");
+      }));
 }
 
 RLController::~RLController()
@@ -252,6 +317,16 @@ bool RLController::run()
   currentPos = Eigen::VectorXd::Map(q.data(), q.size());
   auto vel = robot().encoderVelocities();
   currentVel = Eigen::VectorXd::Map(vel.data(), vel.size());
+
+  // Apply external forces if enabled
+  if(pelvisForceEnabled_) {
+    static int force_call_counter = 0;
+    force_call_counter++;
+    if(force_call_counter % 1000 == 0) {
+      mc_rtc::log::info("[RLController] Pelvis force enabled, calling applyPelvisForce() #{}", force_call_counter);
+    }
+    applyPelvisForce();
+  }
 
   auto ctrl_mode = datastore().get<std::string>("ControlMode");
   if (ctrl_mode.compare("Position") == 0)
@@ -442,6 +517,7 @@ Eigen::VectorXd RLController::getCurrentObservation()
   obs(36) = cos(phase_);
 
   // Command (3 elements) - [vx, vy, yaw_rate]
+  // cmd_(1) = sin(phase_);
   obs.segment(37, 3) = cmd_;
 
   return obs;
@@ -549,6 +625,52 @@ void RLController::applyAction(const Eigen::VectorXd & action)
     }
   }
   TasksSimulation(q_rl_vector);
+}
+
+void RLController::applyPelvisForce()
+{
+  static int debug_counter = 0;
+  debug_counter++;
+  
+  try {
+    // Create force wrench (force + torque)
+    const sva::ForceVecd wrench(Eigen::Vector3d::Zero(), pelvisForce_);
+    
+    // Debug logging every 1000 calls (1 second at 1kHz)
+    if(debug_counter % 1000 == 0) {
+      mc_rtc::log::info("[RLController] Applying pelvis force: [{:.1f}, {:.1f}, {:.1f}] N to robot '{}'", 
+                       pelvisForce_.x(), pelvisForce_.y(), pelvisForce_.z(), robot().name());
+    }
+    
+    // Check if the datastore function exists
+    std::string call_name = robot().name() + "::ApplyForcesOnBody";
+    if(!datastore().has(call_name)) {
+      if(debug_counter % 1000 == 0) {
+        mc_rtc::log::error("[RLController] Datastore call '{}' not available - not running in mc_mujoco?", call_name);
+      }
+      pelvisForceEnabled_ = false;
+      return;
+    }
+    
+    // Call mc_mujoco force application interface with correct signature
+    const std::string body_name = "pelvis";  // const reference
+    Eigen::Vector3d localPos(0, 0, 0);  // by value
+    bool success = datastore().call<bool>(call_name, body_name, wrench, std::move(localPos));
+    
+    if(!success) {
+      if(debug_counter % 1000 == 0) {
+        mc_rtc::log::warning("[RLController] Failed to apply force to pelvis body");
+      }
+    } else {
+      if(debug_counter % 1000 == 0) {
+        mc_rtc::log::info("[RLController] Successfully applied force to pelvis");
+      }
+    }
+  } catch(const std::exception & e) {
+    mc_rtc::log::warning("[RLController] Exception applying pelvis force: {}", e.what());
+    // Disable force if there's an error (likely not running in mc_mujoco)
+    pelvisForceEnabled_ = false;
+  }
 }
 
 void RLController::startInferenceThread()

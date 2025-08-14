@@ -38,6 +38,9 @@ struct RLController : public mc_control::fsm::Controller
 
   void TasksSimulation(Eigen::VectorXd & currentTargetPosition, bool highGains = false);
   
+  // External force application
+  void applyPelvisForce();
+  
   // Threading
   void startInferenceThread();
   void stopInferenceThread();
@@ -73,6 +76,11 @@ struct RLController : public mc_control::fsm::Controller
   // Options
   bool compensateExternalForces = false;
   bool compensateExternalForcesHasChanged = false;
+
+  // External force application
+  bool externalForceEnabled_ = false;
+  bool pelvisForceEnabled_ = false;
+  Eigen::Vector3d pelvisForce_;  // Force to apply to pelvis [Fx, Fy, Fz] in Newtons
 
   // Robot state 
   Eigen::VectorXd refAccel;
@@ -140,4 +148,4 @@ struct RLController : public mc_control::fsm::Controller
   // Timing and statistics
   bool logTiming_ = false;
   size_t timingLogInterval_ = 1000;  // Log every N steps
-}; 
+};
