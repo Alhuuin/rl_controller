@@ -134,6 +134,8 @@ bool RLController::positionControl(bool run)
     }
     robot().mbc().q = q;
     robot().mbc().alpha = alpha; // Set velocity reference to zero
+    
+    a_before_vector = q_zero_vector - q_rl_vector; //no QP, rl vector is enough
     return true;
   }
 
@@ -174,6 +176,7 @@ bool RLController::positionControl(bool run)
   robot().mbc().q = q; // Update the mbc with the new position
   // To close the loop on the external torques:
   robot().mbc().jointTorque = tau; // Update the mbc with the new torque
+  a_before_vector = q_zero_vector - q_cmd;
   return run;
 }
 
@@ -192,8 +195,15 @@ bool RLController::torqueControl(bool run)
     }
 
     robot().mbc().jointTorque = tau;
+    a_before_vector = q_zero_vector - q_rl_vector; //no QP, rl vector is enough
     return true;
   }
+  auto & robot = robots()[0];
+  auto q = robot.encoderValues(); 
+  currentPos = Eigen::VectorXd::Map(q.data(), q.size());
+
+  a_before_vector = q_zero_vector - currentPos;
+
   return run;
 }
 
@@ -216,7 +226,6 @@ void RLController::addLog()
   logger().addLogEntry("RLController_tau_cmd_after_pd_positionCtl", [this]() { return tau_cmd_after_pd; });
 
   // RL variables
-  logger().addLogEntry("RLController_pastAction", [this]() { return a_simuOrder; });
   logger().addLogEntry("RLController_qZero", [this]() { return q_zero_vector; });
   logger().addLogEntry("RLController_a_before", [this]() { return a_before_vector; });
   logger().addLogEntry("RLController_currentObservation", [this]() { return currentObservation_; });

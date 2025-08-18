@@ -191,7 +191,7 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
     Eigen::VectorXd currentObs = getCurrentObservation(ctl);
     
     // Update lastActions_
-    ctl.a_before_vector = ctl.a_vector;
+    // ctl.a_before_vector = ctl.a_vector;
     // Run new inference and update target position
     ctl.a_vector = ctl.policySimulatorHandling_->reorderJointsFromSimulator(action, ctl.dofNumber);
     // Apply action blending formula: target_qpos = default_qpos + 0.75 * action + 0.25 * previous_actions

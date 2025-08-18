@@ -164,7 +164,7 @@ transitions:
 - [Posture_TorqueTask_Pos, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
 - [Posture_TorqueTask_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
 
-init: Posture_TorqueTask_Torque
+init: RL_QP_FDTask_Torque
 
 # RL Controller specific configuration
 policy_path: "policy.onnx"  # Your ONNX policy file in the controller root directory
