@@ -34,6 +34,9 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   void initializeRobot(const mc_rtc::Configuration & config);
   void initializeRLPolicy(const mc_rtc::Configuration & config);
   void initializeState(bool torque_control, int task_type, bool controlled_by_rl);
+  void forceToVelocityControl();
+
+  void manageContacts();
 
   void updateRobotCmdAfterQP();
   void computeInversePD(); // Update q_cmd based on QP acceleration
@@ -49,6 +52,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   void computeRLStateSimulated(); // Compute the state of the robot as if it was simulated with the RL policy
 
   bool isWalkingPolicy = false;
+  bool isPerfectPolicy = false;
 
   // Tasks
   std::shared_ptr<mc_tasks::PostureTask> FDTask;
@@ -121,6 +125,14 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::Vector3d rpy; // Roll, Pitch, Yaw angles of the base
   Eigen::VectorXd legPos, legVel, legAction; // Leg position, velocity and action in mc_rtc order
 
+  Eigen::Vector3d baseAngVel_prev; // Angular velocity of the base
+  Eigen::Vector3d rpy_prev; // Roll, Pitch, Yaw angles of the base
+  Eigen::VectorXd legPos_prev, legVel_prev, legAction_prev; // Leg position, velocity and action in mc_rtc order
+
+  Eigen::Vector3d baseAngVel_prev_prev; // Angular velocity of the base
+  Eigen::Vector3d rpy_prev_prev; // Roll, Pitch, Yaw angles of the base
+  Eigen::VectorXd legPos_prev_prev, legVel_prev_prev, legAction_prev_prev; // Leg position, velocity and action in mc_rtc order
+
   Eigen::Vector3d velCmdRL_;                        // Command vector [vx, vy, yaw_rate]
   double phase_;                               // Current phase for periodic gait
   double phaseFreq_ = 1.2;                           // Phase frequency (1.2 Hz)
@@ -185,4 +197,19 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::VectorXd floatingBase_alphaIn;
 
   double counter = 0.0;
+
+  // Force to velocity control
+  Eigen::VectorXd forceVel; // Velocity from the integration of the acceleration provided by the external forces
+  Eigen::VectorXd forceVel_filtered; // Filtered velocity from the integration of the acceleration provided by the external forces
+  double forceVel_filter_alpha = 0.8;
+  bool forceToVelControl = false;
+  double velMax = 0.3; // m/s
+  double yawRateMax = 0.5; // rad/s
+  double fxScale = 0.1;
+  double fyScale = 0.1;
+  double tauyScale = 0.1;
+
+  double fxDeadZone = 5.0; // N
+  double fyDeadZone = 5.0; // N
+  double tauyDeadZone = 0.5; // Nm
 };
