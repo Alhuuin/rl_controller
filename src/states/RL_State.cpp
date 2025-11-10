@@ -9,7 +9,7 @@ void RL_State::start(mc_control::fsm::Controller & ctl_)
 {
   auto & ctl = static_cast<RLController&>(ctl_);
   ctl.utils_.start_rl_state(ctl, "RL_State");
-  ctl.initializeState(false, TORQUE_TASK, true);
+  ctl.initializeState();
   ctl.torqueTask->target(ctl.torque_target);
   ctl.solver().addTask(ctl.torqueTask);
   mc_rtc::log::info("RLState started");

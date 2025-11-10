@@ -37,15 +37,6 @@ ObserverPipelines:
       config:
           velocity: encoderVelocities
 
-    # - type: Attitude
-    #   required: true
-    #   update: false
-
-    # - type: BodySensor
-    #   update: false
-    #   # config:
-    #   #   bodySensor: FloatingBase
-
     - type: Tilt
       required: true
       update: true
@@ -59,32 +50,18 @@ ObserverPipelines:
           finalBeta: 2 # 1 # 0.0 # 0.00001
           finalGamma: 1 # 2 # 0.0
 
-
-    # - type: KinematicInertial
-    #   update: true
-    #   config:
-    #     imuBodySensor: Accelerometer
-
-
-
 # Transition from initial state to RL execution
 transitions:
 # configure the transitions between every states
 - [RL_State, OK, RL_State, Strict]
 
-# init: Posture_TorqueTask_Pos_Compliance
-# init: RL_State
 init: RL_State
 
 
 # RL Controller specific configuration
-# policy_path: "danger_walking.onnx" #"walking_policy.onnx"  # Your RL policy ONNX model path
-# policy_path: "walking_policy.onnx"
 policy_path: "perfect_walking.onnx"
-is_walking_policy: true
-is_perfect_policy: true
-# policy_path: "standing_policy.onnx"  # Your RL policy ONNX model path
-# is_walking_policy: false
+is_torque_control: true
+use_QP: true
 
 # use_async_inference: true   # Enable asynchronous RL inference for better real-time performance
 use_async_inference: false  # Synchronous with the controller frequency
@@ -93,48 +70,6 @@ log_timing: true
 timing_log_interval: 100
 Simulator: "Maniskill"
 Used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
-
-high_kp:
-    left_hip_yaw_joint: 1500.0
-    left_hip_roll_joint: 1500.0
-    left_hip_pitch_joint: 1500.0
-    left_knee_joint: 1500.0
-    left_ankle_joint: 1500.0
-    right_hip_yaw_joint: 1500.0
-    right_hip_roll_joint: 1500.0
-    right_hip_pitch_joint: 1500.0
-    right_knee_joint: 1500.0
-    right_ankle_joint: 1500.0
-    torso_joint: 200.0
-    left_shoulder_pitch_joint: 200.0
-    left_shoulder_roll_joint: 100.0
-    left_shoulder_yaw_joint: 100.0
-    left_elbow_joint: 200.0
-    right_shoulder_pitch_joint: 200.0
-    right_shoulder_roll_joint: 100.0
-    right_shoulder_yaw_joint: 100.0
-    right_elbow_joint: 200.0
-
-high_kd:
-    left_hip_yaw_joint: 25.0
-    left_hip_roll_joint: 25.0
-    left_hip_pitch_joint: 25.0
-    left_knee_joint: 25.0
-    left_ankle_joint: 75.0
-    right_hip_yaw_joint: 25.0
-    right_hip_roll_joint: 25.0
-    right_hip_pitch_joint: 25.0
-    right_knee_joint: 25.0
-    right_ankle_joint: 75.0
-    torso_joint: 6.0
-    left_shoulder_pitch_joint: 2.0
-    left_shoulder_roll_joint: 2.0
-    left_shoulder_yaw_joint: 2.0
-    left_elbow_joint: 2.0
-    right_shoulder_pitch_joint: 2.0
-    right_shoulder_roll_joint: 2.0
-    right_shoulder_yaw_joint: 2.0
-    right_elbow_joint: 2.0
 
 kp:
     left_hip_yaw_joint: 200.0
@@ -177,45 +112,3 @@ kd:
     right_shoulder_roll_joint: 5.0
     right_shoulder_yaw_joint: 5.0
     right_elbow_joint: 5.0
-
-# kp:
-#     left_hip_yaw_joint: 100.0
-#     left_hip_roll_joint: 100.0
-#     left_hip_pitch_joint: 100.0
-#     left_knee_joint: 100.0
-#     left_ankle_joint: 20.0
-#     right_hip_yaw_joint: 100.0
-#     right_hip_roll_joint: 100.0
-#     right_hip_pitch_joint: 100.0
-#     right_knee_joint: 100.0
-#     right_ankle_joint: 20.0
-#     torso_joint: 100.0
-#     left_shoulder_pitch_joint: 100.0
-#     left_shoulder_roll_joint: 100.0
-#     left_shoulder_yaw_joint: 100.0
-#     left_elbow_joint: 100.0
-#     right_shoulder_pitch_joint: 100.0
-#     right_shoulder_roll_joint: 100.0
-#     right_shoulder_yaw_joint: 100.0
-#     right_elbow_joint: 100.0
-
-# kd:
-#     left_hip_yaw_joint: 10.0
-#     left_hip_roll_joint: 10.0
-#     left_hip_pitch_joint: 10.0
-#     left_knee_joint: 10.0
-#     left_ankle_joint: 4.0
-#     right_hip_yaw_joint: 10.0
-#     right_hip_roll_joint: 10.0
-#     right_hip_pitch_joint: 10.0
-#     right_knee_joint: 10.0
-#     right_ankle_joint: 4.0
-#     torso_joint: 10.0
-#     left_shoulder_pitch_joint: 5.0
-#     left_shoulder_roll_joint: 5.0
-#     left_shoulder_yaw_joint: 5.0
-#     left_elbow_joint: 5.0
-#     right_shoulder_pitch_joint: 5.0
-#     right_shoulder_roll_joint: 5.0
-#     right_shoulder_yaw_joint: 5.0
-#     right_elbow_joint: 5.0

@@ -67,9 +67,6 @@ void utils::run_rl_state(mc_control::fsm::Controller & ctl_, std::string state_n
           const char* mode = ctl.useAsyncInference_ ? "async" : "sync";
           mc_rtc::log::info("{} Step {} ({}): inference time = {} μs, avg policy freq = {:.1f} Hz",
                             state_name, stepCount_, mode, duration.count(), avgFreq);
-
-          // mc_rtc::log::info("Action: min={:.3f}, max={:.3f}, norm={:.3f}",
-          //                   action.minCoeff(), action.maxCoeff(), action.norm());
         }
       }    
     }
@@ -185,44 +182,38 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
   obs.segment(25, 10) = ctl.legAction;
 
   // Addition for walking policy:
-  if (ctl.isWalkingPolicy)
+  // Phase
+  if(ctl.useAsyncInference_)
   {
-    // Phase
-    if(ctl.useAsyncInference_)
-    {
-      auto currentTime = std::chrono::steady_clock::now();
-      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - ctl.startPhase_);
-      ctl.phase_ = fmod(elapsed.count() * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
-    }
-
-    obs(35) = sin(ctl.phase_);
-    obs(36) = cos(ctl.phase_);
-
-    // Command (3 elements) - [vx, vy, yaw_rate]
-    obs.segment(37, 3) = ctl.velCmdRL_;
+    auto currentTime = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - ctl.startPhase_);
+    ctl.phase_ = fmod(elapsed.count() * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
   }
 
-  if(ctl.isPerfectPolicy)
-  {
-    obs.segment(0, 3) = ctl.baseAngVel * 0.25;
-    obs.segment(3, 3) = ctl.baseAngVel_prev * 0.25;
-    obs.segment(6, 3) = ctl.baseAngVel_prev_prev * 0.25;
-    obs.segment(9, 2) = ctl.rpy.segment(0,2);
-    obs.segment(11, 2) = ctl.rpy_prev.segment(0,2);
-    obs.segment(13, 2) = ctl.rpy_prev_prev.segment(0,2);
-    obs.segment(15, 10) = ctl.legPos;
-    obs.segment(25, 10) = ctl.legPos_prev;
-    obs.segment(35, 10) = ctl.legPos_prev_prev;
-    obs.segment(45, 10) = ctl.legVel* 0.05;
-    obs.segment(55, 10) = ctl.legVel_prev* 0.05;
-    obs.segment(65, 10) = ctl.legVel_prev_prev* 0.05;
-    obs.segment(75, 10) = ctl.legAction;
-    obs.segment(85, 10) = ctl.legAction_prev;
-    obs.segment(95, 10) = ctl.legAction_prev_prev;
-    obs(105) = cos(ctl.phase_);
-    obs(106) = sin(ctl.phase_);
-    obs.segment(107, 3) = ctl.velCmdRL_;
-  }
+  obs(35) = sin(ctl.phase_);
+  obs(36) = cos(ctl.phase_);
+
+  // Command (3 elements) - [vx, vy, yaw_rate]
+  obs.segment(37, 3) = ctl.velCmdRL_;
+
+  obs.segment(0, 3) = ctl.baseAngVel * 0.25;
+  obs.segment(3, 3) = ctl.baseAngVel_prev * 0.25;
+  obs.segment(6, 3) = ctl.baseAngVel_prev_prev * 0.25;
+  obs.segment(9, 2) = ctl.rpy.segment(0,2);
+  obs.segment(11, 2) = ctl.rpy_prev.segment(0,2);
+  obs.segment(13, 2) = ctl.rpy_prev_prev.segment(0,2);
+  obs.segment(15, 10) = ctl.legPos;
+  obs.segment(25, 10) = ctl.legPos_prev;
+  obs.segment(35, 10) = ctl.legPos_prev_prev;
+  obs.segment(45, 10) = ctl.legVel* 0.05;
+  obs.segment(55, 10) = ctl.legVel_prev* 0.05;
+  obs.segment(65, 10) = ctl.legVel_prev_prev* 0.05;
+  obs.segment(75, 10) = ctl.legAction;
+  obs.segment(85, 10) = ctl.legAction_prev;
+  obs.segment(95, 10) = ctl.legAction_prev_prev;
+  obs(105) = cos(ctl.phase_);
+  obs(106) = sin(ctl.phase_);
+  obs.segment(107, 3) = ctl.velCmdRL_;
   
   return obs;
 }
@@ -232,30 +223,20 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
   auto & ctl = static_cast<RLController&>(ctl_);
   bool newActionApplied = false;
 
-  if(action.size() != ctl.dofNumber && !ctl.isPerfectPolicy)
-  {
-    mc_rtc::log::error("Action size mismatch: expected {}, got {}", ctl.dofNumber, action.size());
-    return newActionApplied;
-  }
   Eigen::VectorXd fullAction = Eigen::VectorXd::Zero(ctl.dofNumber);
-  if(ctl.isPerfectPolicy)
+  
+  // In that policy action vector contains only leg joints (10)
+  // Construct full action vector with zeros for non-leg joints
+  for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
   {
-    // In that policy action vector contains only leg joints (10)
-    // Construct full action vector with zeros for non-leg joints
-    for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
-    {
-      int idx = ctl.usedJoints_simuOrder[i];
-      if(idx >= fullAction.size()) {
-        mc_rtc::log::error("Leg joint index {} out of bounds for fullAction size {}", idx, fullAction.size());
-      } else if(i >= action.size()) {
-        mc_rtc::log::error("Action index {} out of bounds for action size {}", i, action.size());
-      } else {
-        fullAction(idx) = action(i); // Set leg joint action
-      }
+    int idx = ctl.usedJoints_simuOrder[i];
+    if(idx >= fullAction.size()) {
+      mc_rtc::log::error("Leg joint index {} out of bounds for fullAction size {}", idx, fullAction.size());
+    } else if(i >= action.size()) {
+      mc_rtc::log::error("Action index {} out of bounds for action size {}", i, action.size());
+    } else {
+      fullAction(idx) = action(i); // Set leg joint action
     }
-  }
-  else {
-    fullAction = action;
   }
 
   if(shouldRunInference_) {

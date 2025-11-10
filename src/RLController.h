@@ -33,14 +33,10 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   void addGui();
   void initializeRobot(const mc_rtc::Configuration & config);
   void initializeRLPolicy(const mc_rtc::Configuration & config);
-  void initializeState(bool torque_control, int task_type, bool controlled_by_rl);
-  void forceToVelocityControl();
-
-  void manageContacts();
+  void initializeState();
 
   void updateRobotCmdAfterQP();
   void computeInversePD(); // Update q_cmd based on QP acceleration
-  void computeLimits();
 
   void tasksComputation(Eigen::VectorXd & currentTargetPosition);
   std::tuple<Eigen::VectorXd, Eigen::VectorXd> getPDGains();
@@ -48,20 +44,14 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   bool isHighGain(double tol = 1e-9);
   std::pair<sva::PTransformd, Eigen::Vector3d>  createContactAnchor(const mc_rbdyn::Robot & anchorRobot);
 
-  void addRLConstraints(); // Add constraints specific to the RL policy
   void computeRLStateSimulated(); // Compute the state of the robot as if it was simulated with the RL policy
 
-  bool isWalkingPolicy = false;
-  bool isPerfectPolicy = false;
-
-  // Tasks
-  std::shared_ptr<mc_tasks::PostureTask> FDTask;
+  // Task
   std::shared_ptr<mc_tasks::TorqueTask> torqueTask;
 
   std::map<std::string, std::vector<double>> torque_target; // Target torques for the torque task;
-  int taskType = FD_TASK;
   bool useQP = true;
-  bool controlledByRL = true;
+  bool isTorqueControl = false;
 
   // Robot specific data
   std::vector<std::string> jointNames;
@@ -71,8 +61,6 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   // Gains
   Eigen::VectorXd kp_vector;
   Eigen::VectorXd kd_vector;
-  Eigen::VectorXd high_kp_vector;
-  Eigen::VectorXd high_kd_vector;
   Eigen::VectorXd current_kp;
   Eigen::VectorXd current_kd;
 
@@ -81,7 +69,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 
   // Robot state 
   Eigen::VectorXd refAccel;
-  Eigen::VectorXd tau_d;  // torque sends to a task (Torque Task or Forward Dynamics Task)
+  Eigen::VectorXd tau_d;  // torque sends to a task
   Eigen::VectorXd currentPos;
   Eigen::VectorXd currentVel;
   Eigen::VectorXd currentTau;
@@ -196,20 +184,5 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::VectorXd floatingBase_qIn;
   Eigen::VectorXd floatingBase_alphaIn;
 
-  double counter = 0.0;
-
-  // Force to velocity control
-  Eigen::VectorXd forceVel; // Velocity from the integration of the acceleration provided by the external forces
-  Eigen::VectorXd forceVel_filtered; // Filtered velocity from the integration of the acceleration provided by the external forces
-  double forceVel_filter_alpha = 0.8;
-  bool forceToVelControl = false;
-  double velMax = 0.3; // m/s
-  double yawRateMax = 0.5; // rad/s
-  double fxScale = 0.1;
-  double fyScale = 0.1;
-  double tauyScale = 0.1;
-
-  double fxDeadZone = 5.0; // N
-  double fyDeadZone = 5.0; // N
-  double tauyDeadZone = 0.5; // Nm
+  double counter = 0.0; // Time counter in seconds
 };
