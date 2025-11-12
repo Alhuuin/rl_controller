@@ -42,8 +42,9 @@ The controller automatically detects the input/output dimensions from your model
 
 ## Architecture
 
-The controller consists of:
+The repository consists of:
 
-- **RLPolicyInterface**: ONNX model loading and inference
 - **RLController**: Main FSM controller integrating RL with mc_rtc
+- **RLPolicyInterface**: ONNX model loading and inference
+- **PolicySimulatorHandling**: Handling of the variation of format due to specific simulators (ex : joint order change)
 - **RL_State**: FSM State that runs the RL policy and applies torque commands

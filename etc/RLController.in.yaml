@@ -59,16 +59,16 @@ init: RL_State
 
 
 # RL Controller specific configuration
-policy_path: "perfect_walking.onnx"
+policy_path: "example_walking_h1.onnx"
 is_torque_control: true
 use_QP: true
 
-# use_async_inference: true   # Enable asynchronous RL inference for better real-time performance
-use_async_inference: false  # Synchronous with the controller frequency
+use_async_inference: false   # Enable asynchronous RL inference for better real-time performance
+# use_async_inference: false  # Synchronous with the controller frequency
 
 log_timing: true
 timing_log_interval: 100
-Simulator: "Maniskill"
+Simulator: "Maniskill" # If using IsaacLab, leave Maniskill, behavior is the same here
 Used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
 
 kp:

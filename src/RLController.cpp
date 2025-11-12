@@ -85,7 +85,6 @@ void RLController::reset(const mc_control::ControllerResetData & reset_data)
 {
   mc_control::fsm::Controller::reset(reset_data);
   mc_rtc::log::success("RLController reset completed");
-  // utils_.stopInferenceThread();
 }
 
 void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
@@ -532,7 +531,7 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   
   std::string policyPath = config("policy_path", std::string(""));
   if(policyPath.empty())
-    policyPath = "policy.onnx"; // Default policy path if not specified in config
+    policyPath = "example_walking_h1.onnx"; // Default policy path if not specified in config
 
   mc_rtc::log::info("Loading RL policy from: {}", policyPath);
   try {
