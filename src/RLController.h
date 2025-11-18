@@ -90,11 +90,11 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::VectorXd a_before_vector;             // Last actions applied
   Eigen::VectorXd a_vector;                    // Action in mc_rtc order
 
-  std::vector<std::string> notControlledJoints; // Joints that are not controlled by the RL controller: arms + torso, in that case q_rl = q_zero
   std::vector<std::string> mcRtcJointsOrder;
+  std::vector<int> usedJoints_mcRtcOrder; // Indices of the leg joints in the mc_rtc order
   
   Eigen::VectorXd a_simuOrder;
-  std::vector<int> usedJoints_simuOrder; // Indices of the leg joints in the Maniskill order
+  std::vector<int> usedJoints_simuOrder; // Indices of the leg joints in the Simulator order
 
   // RL policy 
   std::unique_ptr<RLPolicyInterface> rlPolicy_;

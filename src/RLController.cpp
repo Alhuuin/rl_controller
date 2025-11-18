@@ -314,39 +314,7 @@ void RLController::addGui()
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
 {
   // H1 joints in mc_rtc/URDF order (based on unitree_sdk2 reorder_obs function)
-  mcRtcJointsOrder = {
-    "left_hip_yaw_joint",      
-    "left_hip_roll_joint",       
-    "left_hip_pitch_joint",    
-    "left_knee_joint",         
-    "left_ankle_joint",        
-    "right_hip_yaw_joint",     
-    "right_hip_roll_joint",    
-    "right_hip_pitch_joint",   
-    "right_knee_joint",        
-    "right_ankle_joint",       
-    "torso_joint",             
-    "left_shoulder_pitch_joint",  
-    "left_shoulder_roll_joint",     
-    "left_shoulder_yaw_joint",    
-    "left_elbow_joint",           
-    "right_shoulder_pitch_joint", 
-    "right_shoulder_roll_joint",  
-    "right_shoulder_yaw_joint",   
-    "right_elbow_joint"           
-  };
-
-  notControlledJoints = {
-    "left_shoulder_pitch_joint",
-    "right_shoulder_pitch_joint",
-    "left_shoulder_roll_joint",
-    "right_shoulder_roll_joint",
-    "left_shoulder_yaw_joint",
-    "right_shoulder_yaw_joint",
-    "left_elbow_joint",
-    "right_elbow_joint",
-    "torso_joint"
-  };
+  auto mcRtcJointsOrder = config("mc_rtc_joints_order");
 
   dofNumber = robot().mb().nrDof() - 6; // Remove the floating base part (6 DoF)
 
@@ -561,17 +529,17 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   }
 
   // get list of used joints from config
-  std::vector<int> usedJoints = config("Used_joints_index", std::vector<int>{});
-  if(!usedJoints.empty())
+  usedJoints_mcRtcOrder = config("Used_joints_index", std::vector<int>{});
+  if(!usedJoints_mcRtcOrder.empty())
   {
     std::string jointsStr = "[";
-    for(size_t i = 0; i < usedJoints.size(); ++i) {
+    for(size_t i = 0; i < usedJoints_mcRtcOrder.size(); ++i) {
       if(i > 0) jointsStr += ", ";
-      jointsStr += std::to_string(usedJoints[i]);
+      jointsStr += std::to_string(usedJoints_mcRtcOrder[i]);
     }
     jointsStr += "]";
     mc_rtc::log::info("Using custom used joints: {}", jointsStr);
-    usedJoints_simuOrder = policySimulatorHandling_->getSimulatorIndices(usedJoints);
+    usedJoints_simuOrder = policySimulatorHandling_->getSimulatorIndices(usedJoints_mcRtcOrder);
     std::sort(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end());
     jointsStr = "[";
     for(size_t i = 0; i < usedJoints_simuOrder.size(); ++i) {

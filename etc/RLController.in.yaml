@@ -71,6 +71,30 @@ timing_log_interval: 100
 Simulator: "Maniskill" # If using IsaacLab, leave Maniskill, behavior is the same here
 Used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
 
+
+# H1 joints in mc_rtc/URDF order (based on unitree_sdk2 reorder_obs function)
+mc_rtc_joints_order: [
+  "left_hip_yaw_joint",      
+  "left_hip_roll_joint",       
+  "left_hip_pitch_joint",    
+  "left_knee_joint",         
+  "left_ankle_joint",        
+  "right_hip_yaw_joint",     
+  "right_hip_roll_joint",    
+  "right_hip_pitch_joint",   
+  "right_knee_joint",        
+  "right_ankle_joint",       
+  "torso_joint",             
+  "left_shoulder_pitch_joint",  
+  "left_shoulder_roll_joint",     
+  "left_shoulder_yaw_joint",    
+  "left_elbow_joint",           
+  "right_shoulder_pitch_joint", 
+  "right_shoulder_roll_joint",  
+  "right_shoulder_yaw_joint",   
+  "right_elbow_joint"           
+]
+
 kp:
     left_hip_yaw_joint: 200.0
     left_hip_roll_joint: 200.0

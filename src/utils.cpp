@@ -1,4 +1,5 @@
 #include "utils.h"
+#include <cstddef>
 #include <mc_rtc/logging.h>
 
 #include "RLController.h"
@@ -251,24 +252,12 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
     ctl.q_rl = ctl.q_zero_vector + ctl.a_vector;
 
     // For not controlled joints, use the zero position
-    for(const auto & joint : ctl.notControlledJoints)
+    for (size_t i = 0; i < ctl.dofNumber; ++i)
     {
-      auto it = std::find(ctl.mcRtcJointsOrder.begin(), ctl.mcRtcJointsOrder.end(), joint);
-      if(it != ctl.mcRtcJointsOrder.end())
+      auto it = std::find(ctl.usedJoints_mcRtcOrder.begin(), ctl.usedJoints_mcRtcOrder.end(), i);
+      if(it == ctl.usedJoints_mcRtcOrder.end())
       {
-        size_t idx = std::distance(ctl.mcRtcJointsOrder.begin(), it);
-        if(idx < ctl.q_rl.size())
-        {
-          ctl.q_rl(idx) = ctl.q_zero_vector(idx); // Set to zero position
-        }
-        else
-        {
-          mc_rtc::log::error("Joint {} index {} out of bounds for q_rl_vector size {}", joint, idx, ctl.q_rl.size());
-        }
-      }
-      else
-      {
-        mc_rtc::log::error("Joint {} not found in mcRtcJointsOrder", joint);
+        ctl.q_rl(i) = ctl.q_zero_vector(i); // Set to zero position
       }
     }
 
