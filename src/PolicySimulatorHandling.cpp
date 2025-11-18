@@ -11,14 +11,19 @@ PolicySimulatorHandling::PolicySimulatorHandling()
 PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_name):
     simulatorName(simulator_name)
 {
-    if(simulator_name == "Maniskill")
-    {
-        maniskillToMcRtcIdx_ = {0, 3, 7, 11, 15, 1, 4, 8, 12, 16, 2, 5, 9, 13, 17, 6, 10, 14, 18};
-        mcRtcToManiskillIdx_ = {0, 5, 10, 1, 6, 11, 15, 2, 7, 12, 16, 3, 8, 13, 17, 4, 9, 14, 18};
-    }
-    else {
-        mc_rtc::log::error_and_throw("Unsupported simulator: {}", simulator_name);
-    }
+  // check if simuToMcRtcIdx_ needs initialization
+  if (!simuToMcRtcIdx_.empty())
+  {
+    mc_rtc::log::warning("Simulator mapping for {} manually initialized in header", simulator_name);
+  }
+  if(simulator_name == "Maniskill" || simulator_name == "IsaacLab")
+  {
+      mcRtcToSimuIdx_ = {0, 5, 10, 1, 6, 11, 15, 2, 7, 12, 16, 3, 8, 13, 17, 4, 9, 14, 18};
+      simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
+  }
+  else {
+      mc_rtc::log::error_and_throw("Unsupported simulator: {}, please specify a mc_rtc to simulator joint order mapping in PolicySimulatorHandling.h", simulator_name);
+  }
 }
 
 PolicySimulatorHandling::~PolicySimulatorHandling()
@@ -33,22 +38,20 @@ Eigen::VectorXd PolicySimulatorHandling::reorderJointsToSimulator(const Eigen::V
   }
   
   Eigen::VectorXd reordered = Eigen::VectorXd::Zero(dofNumber);
-  if (simulatorName == "Maniskill")
-  {
-    for(int i = 0; i < dofNumber; i++) {
-        if(i >= mcRtcToManiskillIdx_.size()) {
-        mc_rtc::log::error("Trying to access mcRtcToManiskillIdx_[{}] but size is {}", i, mcRtcToManiskillIdx_.size());
-        reordered[i] = 0.0;
-        continue;
-        }
-        
-        int srcIdx = mcRtcToManiskillIdx_[i];
-        if(srcIdx >= obs.size()) {
-        mc_rtc::log::error("Index {} out of bounds for obs size {}", srcIdx, obs.size());
-        reordered[i] = 0.0;
-        } else {
-        reordered[i] = obs(srcIdx);
-        }
+  for(int i = 0; i < dofNumber; i++) {
+    if(i >= mcRtcToSimuIdx_.size()) {
+      mc_rtc::log::error("Trying to access mcRtcToSimuIdx_[{}] but size is {}", i, mcRtcToSimuIdx_.size());
+      reordered[i] = 0.0;
+      continue;
+    }
+    
+    int srcIdx = mcRtcToSimuIdx_[i];
+    if(srcIdx >= obs.size()) {
+      mc_rtc::log::error("Index {} out of bounds for obs size {}", srcIdx, obs.size());
+      reordered[i] = 0.0;
+    }
+    else {
+      reordered[i] = obs(srcIdx);
     }
   }
   return reordered;
@@ -62,44 +65,51 @@ Eigen::VectorXd PolicySimulatorHandling::reorderJointsFromSimulator(const Eigen:
   }
   
   Eigen::VectorXd reordered = Eigen::VectorXd::Zero(dofNumber);
-  if (simulatorName == "Maniskill")
-  {
-    for(int i = 0; i < dofNumber; i++) {
-        if(i >= maniskillToMcRtcIdx_.size()) {
-        mc_rtc::log::error("Trying to access maniskillToMcRtcIdx_[{}] but size is {}", i, maniskillToMcRtcIdx_.size());
-        reordered[i] = 0.0;
-        continue;
-        }
-        
-        int srcIdx = maniskillToMcRtcIdx_[i];
-        if(srcIdx >= action.size()) {
-        mc_rtc::log::error("Action reorder index {} out of bounds for action size {}", srcIdx, action.size());
-        reordered[i] = 0.0;
-        } else {
-        reordered[i] = action(srcIdx);
-        }
+  for(int i = 0; i < dofNumber; i++) {
+    if(i >= simuToMcRtcIdx_.size()) {
+      mc_rtc::log::error("Trying to access simuToMcRtcIdx_[{}] but size is {}", i, simuToMcRtcIdx_.size());
+      reordered[i] = 0.0;
+      continue;
+    }
+    
+    int srcIdx = simuToMcRtcIdx_[i];
+    if(srcIdx >= action.size()) {
+      mc_rtc::log::error("Action reorder index {} out of bounds for action size {}", srcIdx, action.size());
+      reordered[i] = 0.0;
+    }
+    else {
+      reordered[i] = action(srcIdx);
     }
   }
   return reordered;
 }
 
+std::vector<int> PolicySimulatorHandling::invertMapping(const std::vector<int>& jointsMap)
+{
+  std::vector<int> simuToMcRtc(jointsMap.size(), -1);
+
+  for (size_t i = 0; i < jointsMap.size(); ++i)
+  {
+      int simu = jointsMap[i];
+      simuToMcRtc[simu] = i;
+  }
+
+  return simuToMcRtc;
+}
+
 std::vector<int> PolicySimulatorHandling::getSimulatorIndices(std::vector<int> mcRtcIndices) const
 {
-    if(simulatorName == "Maniskill")
-    {
-        std::vector<int> maniskillIndices;
-        for(int idx : mcRtcIndices)
-        {
-            if(idx < mcRtcToManiskillIdx_.size())
-            {
-                maniskillIndices.push_back(maniskillToMcRtcIdx_[idx]);
-            }
-            else
-            {
-                mc_rtc::log::error("Index {} out of bounds for mcRtcToManiskillIdx_ size {}", idx, mcRtcToManiskillIdx_.size());
-            }
-        }
-        return maniskillIndices;
-    }
-    return {};
+  std::vector<int> simuIndices;
+  for(int idx : mcRtcIndices)
+  {
+      if(idx < simuToMcRtcIdx_.size())
+      {
+          simuIndices.push_back(simuToMcRtcIdx_[idx]);
+      }
+      else
+      {
+          mc_rtc::log::error("Index {} out of bounds for simuToMcRtcIdx_ size {}", idx, simuToMcRtcIdx_.size());
+      }
+  }
+  return simuIndices;
 }

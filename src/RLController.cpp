@@ -517,15 +517,15 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   }
 
   std::string simulator = config("Simulator", std::string(""));
-  // check if simulator is Maniskill
-  if(simulator == "Maniskill")
+  if (simulator.empty())
   {
-    mc_rtc::log::info("Using Maniskill handling");
-    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>("Maniskill");
-  }
-  else {
-    mc_rtc::log::warning("Simulator not recognized or not set, using default handling");
+    mc_rtc::log::warning("Simulator not set, using default handling");
     policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>();
+  }
+  else
+  {
+    mc_rtc::log::info("Using {} handling", simulator);
+    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>(simulator);
   }
 
   // get list of used joints from config
