@@ -1,9 +1,11 @@
 #include "RLController.h"
 #include <Eigen/src/Core/VectorBlock.h>
+#include <RBDyn/Jacobian.h>
 #include <RBDyn/MultiBodyConfig.h>
 #include <SpaceVecAlg/SpaceVecAlg>
 #include <eigen3/Eigen/src/Core/Matrix.h>
 #include <mc_rtc/gui/ArrayInput.h>
+#include <mc_rtc/gui/NumberInput.h>
 #include <mc_rtc/logging.h>
 #include <mc_rbdyn/configuration_io.h>
 #include <chrono>
@@ -18,15 +20,20 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
   logTiming_ = config("log_timing");
   timingLogInterval_ = config("timing_log_interval");
   isWalkingPolicy = config("is_walking_policy", false);
+  isPerfectPolicy = config("is_perfect_policy", false);
 
   //Initialize Constraints
-  addRLConstraints(); // Add constraints specific to the RL policy
+  // addRLConstraints(); // Add constraints specific to the RL policy // DONT WORK YET
   selfCollisionConstraint->setCollisionsDampers(solver(), {1.2, 200.0});
   solver().removeConstraintSet(dynamicsConstraint);
   dynamicsConstraint = mc_rtc::unique_ptr<mc_solver::DynamicsConstraint>(
     new mc_solver::DynamicsConstraint(robots(), 0, {diPercent, dsPercent, 0.0, 1.2, 200.0}, velPercent, true));
   solver().addConstraintSet(dynamicsConstraint);
 
+  std::unique_ptr<mc_solver::ContactConstraint> contactConstraintTest;
+  contactConstraintTest =std::make_unique<mc_solver::ContactConstraint>(timeStep, mc_solver::ContactConstraint::ContactType::Acceleration);
+  solver().addConstraintSet(contactConstraintTest);
+  
   // Initialize Tasks
   FDTask = std::make_shared<mc_tasks::PostureTask>(solver(), robot().robotIndex(), 0.0, 1000.0);
   FDTask->stiffness(0.0);
@@ -50,6 +57,11 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
   mc_rtc::log::success("RLController init");
 }
 
+// void RLController::manageContacts()
+// {
+//   addContact(const Contact &c)
+// }
+
 bool RLController::run()
 {
   counter += timeStep;
@@ -58,11 +70,13 @@ bool RLController::run()
   ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
   computeLimits();
 
+  if(forceToVelControl) forceToVelocityControl();
+
   auto & real_robot = realRobot(robots()[0].name());
 
   auto qIn = real_robot.mbc().q;
   auto alphaIn = real_robot.mbc().alpha;
-  auto tauIn = real_robot.mbc().jointTorque;
+  // auto tauIn = real_robot.mbc().jointTorque;
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
   Eigen::MatrixXd Kp_inv = current_kp.cwiseInverse().asDiagonal();
@@ -339,6 +353,9 @@ void RLController::addLog()
   logger().addLogEntry("RLController_floatingBase_tauOutPD", [this]() { return floatingBase_tauOutPD; });
   logger().addLogEntry("RLController_floatingBase_qIn", [this]() { return floatingBase_qIn; });
   logger().addLogEntry("RLController_floatingBase_alphaIn", [this]() { return floatingBase_alphaIn; });
+
+  logger().addLogEntry("RLController_forceVel", [this]() { return forceVel; });
+  logger().addLogEntry("RLController_forceVel_filtered", [this]() { return forceVel_filtered; });
 }
 
 void RLController::addGui()
@@ -348,6 +365,34 @@ void RLController::addGui()
   // Add a button to change the velocity command
   gui()->addElement({"FSM", "Options"},
   mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL_));
+  
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::Checkbox("Force to Velocity Control", forceToVelControl));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Velocity Max (m/s)", velMax));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Yaw Rate Max (rad/s)", yawRateMax));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Fx Scale", fxScale));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Fy Scale", fyScale));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Tauy Scale", tauyScale));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Fx Deadzone", fxDeadZone));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Fy Deadzone", fyDeadZone));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Tauy Deadzone", tauyDeadZone));
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::NumberInput("Force Vel Filter Alpha", forceVel_filter_alpha));
+
+  // gui()->addPlot("Velocity Command RL", 
+  //   mc_rtc::gui::plot::X("t", [this]() { return counter; }),
+  //   mc_rtc::gui::plot::Y("vx", [this]() { return velCmdRL_[0]; }, mc_rtc::gui::Color::Red),
+  //   mc_rtc::gui::plot::Y("vy", [this]() { return velCmdRL_[1]; }, mc_rtc::gui::Color::Green),
+  //   mc_rtc::gui::plot::Y("vyaw", [this]() { return velCmdRL_[2]; }, mc_rtc::gui::Color::Blue)
+  // );
 }
 
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
@@ -526,6 +571,10 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   auto alphaIn = real_robot.mbc().alpha;
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
+
+  // Velocity from the integration of the acceleration provided by the external forces
+  forceVel = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  forceVel_filtered = Eigen::VectorXd::Zero(robot().mb().nrDof());
 }
 
 void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
@@ -545,6 +594,18 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   legVel = Eigen::VectorXd::Zero(10);
   legAction = Eigen::VectorXd::Zero(10);
 
+  baseAngVel_prev = Eigen::Vector3d::Zero();
+  rpy_prev = Eigen::Vector3d::Zero();
+  legPos_prev = Eigen::VectorXd::Zero(10);
+  legVel_prev = Eigen::VectorXd::Zero(10);
+  legAction_prev = Eigen::VectorXd::Zero(10);
+
+  baseAngVel_prev_prev = Eigen::Vector3d::Zero();
+  rpy_prev_prev = Eigen::Vector3d::Zero();
+  legPos_prev_prev = Eigen::VectorXd::Zero(10);
+  legVel_prev_prev = Eigen::VectorXd::Zero(10);
+  legAction_prev_prev = Eigen::VectorXd::Zero(10);
+
   a_simuOrder = Eigen::VectorXd::Zero(dofNumber);
 
   mc_rtc::log::info("Reference position initialized with {} joints", q_zero_vector.size());
@@ -561,7 +622,6 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   // velCmdRL_(0) = 1.09;
   // velCmdRL_(1) = 0.6;
   // velCmdRL_(2) = 0.5;
-  // velCmdRL_(1) = -20;
   phase_ = 0.0;  // Phase for periodic gait
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
   
@@ -873,4 +933,74 @@ void RLController::addRLConstraints()
     robot().tl().at(mcJointId)[0] = -torqueLim_simuOrder(i);
     robot().tu().at(mcJointId)[0] = torqueLim_simuOrder(i);
   }
+}
+
+void RLController::forceToVelocityControl()
+{
+  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+  auto & real_robot = realRobot(robots()[0].name());
+  rbd::ForwardDynamics fd(real_robot.mb());
+  fd.computeH(real_robot.mb(), real_robot.mbc());
+  Eigen::MatrixXd M_w_floatingBase = fd.H();
+    
+  Eigen::VectorXd refAccel_w_floating_base = M_w_floatingBase.llt().solve(extTorqueSensor.torques());
+  forceVel += refAccel_w_floating_base * timeStep;
+  forceVel_filtered = forceVel_filter_alpha * forceVel_filtered + (1 - forceVel_filter_alpha) * forceVel;
+  // forceVel = forceVel_filtered;
+
+  rbd::Jacobian jac = rbd::Jacobian(robot().mb(), "left_elbow_link");
+  // Eigen::MatrixXd J_full = jac.jacobian(real_robot.mb(), real_robot.mbc());
+  // // Partition J_full = [J_base (6x6) , J_act (6 x n_a)]
+  // const int cols = J_full.cols();
+  // const int n_base = 6;
+  // const int n_act = cols - n_base;
+  // Eigen::MatrixXd J_base = J_full.block(0, 0, 6, n_base);   // if you need it
+  // Eigen::MatrixXd J_act  = J_full.block(0, n_base, 6, n_act); // 6 x n_a
+
+  // Eigen::VectorXd tau_full = extTorqueSensor.torques(); // (6 + n_a) x 1
+  // // Least squares estimate of wrench W (6x1)
+  // Eigen::MatrixXd JJt = J_full * J_full.transpose(); // 6x6
+  // double lambda = 1e-6;
+  // JJt += lambda * Eigen::MatrixXd::Identity(6,6);
+  // Eigen::VectorXd rhs = J_full * tau_full;
+  // Eigen::VectorXd W = JJt.ldlt().solve(rhs);
+
+  auto jTranspose = jac.jacobian(real_robot.mb(), real_robot.mbc());
+  jTranspose.transposeInPlace();
+  Eigen::VectorXd leftArmForce = jTranspose.completeOrthogonalDecomposition().solve(extTorqueSensor.torques());
+
+  // double fx = W[3];
+  // double fy = W[4];
+  // double tauy = W[1];
+
+  // double fx = forceVel_filtered[3];
+  // double fy = forceVel_filtered[4];
+  // double tauy = forceVel_filtered[1];
+
+  double fx = leftArmForce[3];
+  double fy = leftArmForce[4];
+  double tauy = leftArmForce[1];
+
+  // double fx = extTorqueSensor.torques()[0];
+  // double fy = extTorqueSensor.torques()[1];
+  // double tauy = extTorqueSensor.torques()[4];
+
+  double velx = 0.0;
+  if(fx> fxDeadZone) velx = (fx - fxDeadZone) * fxScale;
+  if(velx > velMax) velx = velMax;
+  if(velx < -velMax) velx = -velMax;
+
+  double vely = 0.0;
+  if(fy> fyDeadZone) vely = (fy - fyDeadZone) * fyScale;
+  if(vely > velMax) vely = velMax;
+  if(vely < -velMax) vely = -velMax;
+
+  double yawRate = 0.0;
+  if(tauy> tauyDeadZone) yawRate = (tauy - tauyDeadZone) * tauyScale;
+  if(yawRate > yawRateMax) yawRate = yawRateMax;
+  if(yawRate < -yawRateMax) yawRate = -yawRateMax;
+
+  velCmdRL_(0) = velx;
+  velCmdRL_(1) = vely;
+  velCmdRL_(2) = yawRate;
 }

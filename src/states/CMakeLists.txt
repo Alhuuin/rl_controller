@@ -11,4 +11,6 @@ add_fsm_state_simple(Posture_TorqueTask_Pos)
 add_fsm_state_simple(PureRL_Torque)
 add_fsm_state_simple(PureRL_Pos)
 
+add_fsm_state_simple(Posture_TorqueTask_Pos_Compliance)
+
 add_fsm_data_directory(data)
