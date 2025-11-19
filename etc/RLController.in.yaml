@@ -1,10 +1,4 @@
 ---
-
-Simulator: "Maniskill"
-Used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
-
-# RLController FSM Configuration
-# Backend: TVM
 # If true, the FSM transitions are managed by an external tool
 Managed: false
 # If true and the FSM is self-managed, transitions should be triggered
@@ -33,19 +27,45 @@ collisions:
 - type: collision
   useMinimal: true
 
-# Basic constraints
-# constraints:
-#   # - type: "contact"
-  # - type: "dynamics
-  #   damper: [0.1, 0.01, 0.5]
-  # - type: "compoundJoint"
+ObserverPipelines:
+  name: MainPipeline
+  gui: true
+  log: true
 
-# RL Controller specific configuration
-policy_path: "policy.onnx"  # Your ONNX policy file in the controller root directory
-use_async_inference: true   # Enable asynchronous RL inference for better real-time performance
+  observers:
+    - type: Encoder
+      config:
+          velocity: encoderVelocities
 
-log_timing: true
-timing_log_interval: 1000
+    # - type: Attitude
+    #   required: true
+    #   update: false
+
+    # - type: BodySensor
+    #   update: false
+    #   # config:
+    #   #   bodySensor: FloatingBase
+
+    - type: Tilt
+      required: true
+      update: true
+      config:
+        anchorFrameFunction: anchorFrameFunction
+        filterGains:
+          initAlpha: 2 # 5 # 0.0
+          initBeta: 2 # 1 # 0.0 # 0.00001
+          initGamma: 1 # 2 # 0.0
+          finalAlpha: 2 # 5 # 0.0
+          finalBeta: 2 # 1 # 0.0 # 0.00001
+          finalGamma: 1 # 2 # 0.0
+
+
+    # - type: KinematicInertial
+    #   update: true
+    #   config:
+    #     imuBodySensor: Accelerometer
+
+
 
 # Transition from initial state to RL execution
 transitions:
@@ -116,7 +136,6 @@ transitions:
 - [PureRL_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
 - [PureRL_Pos, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
 
-
 - [Posture_FDTask_Torque, OK, Posture_FDTask_Torque, Strict]
 - [Posture_FDTask_Torque, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
 - [Posture_FDTask_Torque, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
@@ -161,53 +180,26 @@ transitions:
 - [Posture_TorqueTask_Pos, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
 - [Posture_TorqueTask_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
 
+# init: PureRL_Pos
+# init: RL_QP_TorqueTask_Pos
+init: RL_QP_FDTask_Pos
+# init: Posture_FDTask_Pos
 
-# Start with initial state
-# init: "RLController_Initial" 
-# init: "Posture_Torque" 
-init: "PureRL_Pos"  # Start with PureRL_Pos state
 
-# ObserverPipelines:
-# - name: MainPipeline                     # - Create a new pipeline
-#   gui: true                              #   diplay the pipeline in the GUI (default = false)
-#   log: true                              #   log observers (default)
+# RL Controller specific configuration
+policy_path: "danger_walking.onnx" #"walking_policy.onnx"  # Your RL policy ONNX model path
+# policy_path: "walking_policy.onnx"
+is_walking_policy: true
+# policy_path: "standing_policy.onnx"  # Your RL policy ONNX model path
+# is_walking_policy: false
 
-#   observers:                             #   declare which observers to use
-#   - type: Encoder                        # - Use an EncoderObserver
-#     config:                              #
-#       position: encoderValues            #    - Sets joint position from encoder sensor values (default)
-#       velocity: encoderFiniteDifferences #    - Computes joint velocities by finite differences  (default)
-#                                          # We now have the estimation of each joint position and velocity and the corresponding
-#                                          # body positions and velocities, but we are still missing the floating base
+# use_async_inference: true   # Enable asynchronous RL inference for better real-time performance
+use_async_inference: false  # Synchronous with the controller frequency
 
-#   - type: BodySensor                     # - Use a BodySensor observer
-#     update: false                        #   Do not update the real robot state
-#     gui: false                           #   Do not display in the gui
-#     config:                              #
-#       bodySensor: FloatingBase
-
-ObserverPipelines:
-  name: "Pipeline"
-  gui: true
-  observers:
-    - type: Encoder
-      config:
-          velocity: encoderVelocities
-    
-    # - type: Attitude
-    #   required: true
-    #   update: true
-
-    # - type: KinematicInertial              # - Estimates the floating base state using the KinematicInertial observer
-    #   update: true                         #   update the real robot instance from its results
-    #   gui: true                            #   Displays the estimated velocity as an arrow (default)
-    #   config:
-    #     imuBodySensor: Accelerometer
-
-    - type: BodySensor
-      update: true
-      config:
-        bodySensor: FloatingBase
+log_timing: true
+timing_log_interval: 100
+Simulator: "Maniskill"
+Used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
 
 high_kp:
     left_hip_yaw_joint: 1500.0
@@ -235,12 +227,12 @@ high_kd:
     left_hip_roll_joint: 25.0
     left_hip_pitch_joint: 25.0
     left_knee_joint: 25.0
-    left_ankle_joint: 25.0
+    left_ankle_joint: 75.0
     right_hip_yaw_joint: 25.0
     right_hip_roll_joint: 25.0
     right_hip_pitch_joint: 25.0
     right_knee_joint: 25.0
-    right_ankle_joint: 25.0
+    right_ankle_joint: 75.0
     torso_joint: 6.0
     left_shoulder_pitch_joint: 2.0
     left_shoulder_roll_joint: 2.0

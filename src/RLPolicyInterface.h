@@ -4,7 +4,8 @@
 #include <string>
 #include <memory>
 
-#include <onnxruntime_cxx_api.h>
+// #include <onnxruntime_cxx_api.h>
+#include "onnxruntime/include/onnxruntime_cxx_api.h"
 
 /**
  * @brief Interface for RL policy inference
@@ -23,19 +24,14 @@ public:
   RLPolicyInterface(const std::string & policyPath);
   
   /**
-   * @brief Construct dummy policy (for testing)
-   */
-  RLPolicyInterface();
-  
-  /**
    * @brief Destructor
    */
   ~RLPolicyInterface();
   
   /**
    * @brief Run inference on the policy
-   * @param observation Input observation vector (size 40)
-   * @return Action vector (size 19)
+   * @param observation Input observation vector
+   * @return Action vector
    */
   Eigen::VectorXd predict(const Eigen::VectorXd & observation);
   
@@ -49,27 +45,30 @@ public:
    * @brief Get the expected observation size
    * @return Expected observation dimension
    */
-  int getObservationSize() const { return 40; }
+  int getObservationSize() const { return inputSize_; }
   
   /**
    * @brief Get the action size
    * @return Action dimension  
    */
-  int getActionSize() const { return 19; }
+  int getActionSize() const { return outputSize_; }
 
 private:
+  int inputSize_;
+  int outputSize_;
+  bool inputIs2D_;    // true if input shape is [batch, obs_size], false if [obs_size]
+  bool outputIs2D_;   // true if output shape is [batch, action_size], false if [action_size]
+  
   bool isLoaded_;
   std::string policyPath_;
   
   std::unique_ptr<Ort::Session> onnxSession_;
   std::unique_ptr<Ort::Env> onnxEnv_;
   std::unique_ptr<Ort::MemoryInfo> memoryInfo_;
-  std::vector<std::string> inputNames_;
-  std::vector<std::string> outputNames_;
-  std::vector<const char*> inputNamePtrs_;
-  std::vector<const char*> outputNamePtrs_;
-  std::vector<int64_t> inputShape_;
-  std::vector<int64_t> outputShape_;
+  std::string inputName_;
+  std::string outputName_;
+  const char* inputNamePtr_;   // Cached pointer for inference performance
+  const char* outputNamePtr_;  // Cached pointer for inference performance
   
   void loadPolicy(const std::string & path);
   

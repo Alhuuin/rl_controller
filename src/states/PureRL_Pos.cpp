@@ -1,30 +1,30 @@
 #include "PureRL_Pos.h"
+#include "../RLController.h"
 
 void PureRL_Pos::configure(const mc_rtc::Configuration & config)
 {
 }
 
-void PureRL_Pos::start(mc_control::fsm::Controller & ctl)
+void PureRL_Pos::start(mc_control::fsm::Controller & ctl_)
 {
-  utils::start_rl_state(ctl, "PureRL_FDTask_Pos");
-  auto & ctl_rl = static_cast<RLController&>(ctl);
-
-  ctl_rl.datastore().get<std::string>("ControlMode") = "Position";
-  ctl_rl.useQP = false;
-  ctl_rl.taskType = 42;
-
-  mc_rtc::log::info("using Pure RL (no QP) and Position control");
+  auto & ctl = static_cast<RLController&>(ctl_);
+  ctl.utils_.start_rl_state(ctl, "PureRL_Pos");
+  ctl.initializeState(false, PURE_RL, true);
+  mc_rtc::log::info("PureRL_Pos state started");
 }
 
-bool PureRL_Pos::run(mc_control::fsm::Controller & ctl)
+bool PureRL_Pos::run(mc_control::fsm::Controller & ctl_)
 {
-  utils::run_rl_state(ctl, "PureRL_FDTask_Pos");
+  auto & ctl = static_cast<RLController&>(ctl_);
+  ctl.utils_.run_rl_state(ctl, "PureRL_Pos");
+  ctl.tasksComputation(ctl.q_rl);
   return false;
 }
 
-void PureRL_Pos::teardown(mc_control::fsm::Controller & ctl)
+void PureRL_Pos::teardown(mc_control::fsm::Controller & ctl_)
 {
-  utils::teardown_rl_state(ctl, "PureRL_Pos");
+  auto & ctl = static_cast<RLController &>(ctl_);
+  ctl.utils_.teardown_rl_state(ctl, "PureRL_Pos");
 }
 
 EXPORT_SINGLE_STATE("PureRL_Pos", PureRL_Pos)

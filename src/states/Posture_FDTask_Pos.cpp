@@ -1,5 +1,6 @@
 #include "Posture_FDTask_Pos.h"
 #include <mc_rtc/logging.h>
+#include "../RLController.h"
 
 void Posture_FDTask_Pos::configure(const mc_rtc::Configuration & config)
 {
@@ -8,63 +9,16 @@ void Posture_FDTask_Pos::configure(const mc_rtc::Configuration & config)
 void Posture_FDTask_Pos::start(mc_control::fsm::Controller & ctl_)
 {
   auto & ctl = static_cast<RLController&>(ctl_);
-  mc_rtc::log::info("Posture_FDTask_Pos state started");
-
-  ctl.datastore().get<std::string>("ControlMode") = "Position";
-  ctl.useQP = true;
-  ctl.taskType = 1;
-
-  // std::vector<double> kp, kd;
-  // try {
-  //     bool success = ctl.datastore().call<bool>("h1::GetPDGains", kp, kd);
-  //     if(success) {
-  //         // Process gains...
-  //         const std::vector<double> const_kp = {1500.0, 1500.0, 1500.0, 1500.0, 1500.0, 1500.0, 1500.0, 1500.0, 1500.0, 1500.0, 200.0, 200.0, 100.0, 100.0, 200.0, 200.0, 100.0, 100.0, 200.0};
-  //         const std::vector<double> const_kd = {25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 6.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0};
-  //         bool set_success = ctl.datastore().call<bool>("h1::SetPDGains", const_kp, const_kd);
-  //         if(set_success) {
-  //             mc_rtc::log::info("Successfully retrieved and set PD gains: kp size={}, kd size={}", kp.size(), kd.size());
-  //             for (auto el : const_kp)
-  //             {
-  //               mc_rtc::log::info(el);
-  //             }
-  //         } else {
-  //             mc_rtc::log::warning("Failed to set PD gains to MuJoCo");
-  //         }
-  //     } else {
-  //         mc_rtc::log::warning("Failed to retrieve PD gains from MuJoCo");
-  //     }
-  // } catch(const std::exception& e) {
-  //     mc_rtc::log::warning("Failed to access PD gains: {}", e.what());
-  // }
-
-  ctl.FDTask->stiffness(0.0);
-  ctl.FDTask->damping(0.0);
-  ctl.TasksSimulation(ctl.q_zero_vector, true);
+  ctl.initializeState(false, FD_TASK, false);
   ctl.FDTask->refAccel(ctl.refAccel);
   ctl.solver().addTask(ctl.FDTask);
-
-  mc_rtc::log::success("Posture_FDTask_Pos state initialization completed");
-
-  mc_rtc::log::info("Following default Posture with Position control");
+  mc_rtc::log::info("Posture_FDTask_Pos state started");
 }
 
 bool Posture_FDTask_Pos::run(mc_control::fsm::Controller & ctl_)
 { 
   auto & ctl = static_cast<RLController&>(ctl_);
-  // ctl.robot().forwardKinematics();
-  // ctl.robot().forwardVelocity();
-  // ctl.robot().forwardAcceleration();
-
-  // auto q = ctl.robot().encoderValues();
-  // ctl.currentPos = Eigen::VectorXd::Map(q.data(), q.size());
-  // auto vel = ctl.robot().encoderVelocities();
-  // ctl.currentVel = Eigen::VectorXd::Map(vel.data(), vel.size());
-
-  // Eigen::MatrixXd Kp_inv = ctl.kp_vector.cwiseInverse().asDiagonal();
-
-  // ctl.q_cmd = ctl.currentPos + Kp_inv*(ctl.high_kp_vector*(ctl.q_zero_vector - ctl.currentPos) - ctl.currentVel.cwiseProduct(ctl.high_kd_vector - ctl.kd_vector)); //
-  ctl.TasksSimulation(ctl.q_zero_vector, true);
+  ctl.tasksComputation(ctl.q_zero_vector);
   ctl.FDTask->refAccel(ctl.refAccel);
   return false;
 }

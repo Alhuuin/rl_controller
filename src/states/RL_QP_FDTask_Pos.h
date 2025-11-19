@@ -1,7 +1,6 @@
 #pragma once
 
 #include <mc_control/fsm/State.h>
-#include "../utils.h"
 
 struct MC_CONTROL_FSM_STATE_DLLAPI RL_QP_FDTask_Pos : mc_control::fsm::State
 {

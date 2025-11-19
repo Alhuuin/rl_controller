@@ -1,7 +1,6 @@
 #pragma once
 
 #include <mc_control/fsm/State.h>
-#include "../utils.h"
 
 struct MC_CONTROL_FSM_STATE_DLLAPI Posture_TorqueTask_Torque : mc_control::fsm::State
 {

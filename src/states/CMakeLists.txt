@@ -1,21 +1,14 @@
-add_fsm_state_simple(RLController_Initial)
 add_fsm_state_simple(RL_QP_FDTask_Torque)
 add_fsm_state_simple(RL_QP_FDTask_Pos)
 add_fsm_state_simple(Posture_FDTask_Torque)
 add_fsm_state_simple(Posture_FDTask_Pos)
-add_fsm_state_simple(PureRL_Torque)
-add_fsm_state_simple(PureRL_Pos)
+
 add_fsm_state_simple(RL_QP_TorqueTask_Torque)
 add_fsm_state_simple(RL_QP_TorqueTask_Pos)
 add_fsm_state_simple(Posture_TorqueTask_Torque)
 add_fsm_state_simple(Posture_TorqueTask_Pos)
 
+add_fsm_state_simple(PureRL_Torque)
+add_fsm_state_simple(PureRL_Pos)
 
-set(FSM_STATES RLController_Initial RL_QP_FDTask_Torque RL_QP_FDTask_Pos Posture_FDTask_Torque Posture_FDTask_Pos PureRL_Torque PureRL_Pos RL_QP_TorqueTask_Torque RL_QP_TorqueTask_Pos Posture_TorqueTask_Torque Posture_TorqueTask_Pos)
-
-foreach(state ${FSM_STATES})
-  message(STATUS "Configuring FSM target: ${state}")
-  target_sources(${state} PRIVATE ../utils.cpp)
-  target_include_directories(${state} PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
-  target_link_libraries(${state} PRIVATE ${ONNXRUNTIME_LIB})
-endforeach()
+add_fsm_data_directory(data)

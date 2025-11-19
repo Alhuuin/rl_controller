@@ -1,39 +1,30 @@
-# ---- Check for ONNX Runtime ----
+# ---- ONNX Runtime local setup ----
 
-set(ONNXRUNTIME_ROOT "" CACHE PATH "Path to ONNX Runtime installation")
+# Absolute paths to your local ONNX Runtime
+set(ONNXRUNTIME_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime)
+set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
+set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
+# For build-time runs (ctest, running from build dir)
+set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
 
-if(NOT ONNXRUNTIME_ROOT AND DEFINED ENV{ONNXRUNTIME_ROOT})
-  set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})
-endif()
+# For after install
+set(CMAKE_INSTALL_RPATH "${ONNXRUNTIME_LIB_DIR}")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-find_path(ONNXRUNTIME_INCLUDE_DIR
-  NAMES onnxruntime_cxx_api.h
-  HINTS ${ONNXRUNTIME_ROOT}
-  PATH_SUFFIXES include
-  PATHS
-    /usr/include
-    /usr/local/include
-)
-
+# Find *only* in the local lib dir, never system paths
 find_library(ONNXRUNTIME_LIB
   NAMES onnxruntime
-  HINTS ${ONNXRUNTIME_ROOT}
-  PATH_SUFFIXES lib
-  PATHS
-    /usr/lib
-    /usr/local/lib
+  PATHS ${ONNXRUNTIME_LIB_DIR}
+  NO_DEFAULT_PATH
+  REQUIRED
 )
 
-if(NOT ONNXRUNTIME_INCLUDE_DIR)
-  message(FATAL_ERROR "ONNX Runtime headers not found. Set -DONNXRUNTIME_ROOT or install it.")
-endif()
-
 if(NOT ONNXRUNTIME_LIB)
-  message(FATAL_ERROR "ONNX Runtime library not found. Set -DONNXRUNTIME_ROOT or install it.")
+  message(FATAL_ERROR "ONNX Runtime library not found in ${ONNXRUNTIME_LIB_DIR}")
 endif()
 
-message(STATUS "ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIR}")
-message(STATUS "ONNX Runtime lib: ${ONNXRUNTIME_LIB}")
+message(STATUS "Using ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIR}")
+message(STATUS "Using ONNX Runtime lib: ${ONNXRUNTIME_LIB}")
 
 # ---- Sources ----
 

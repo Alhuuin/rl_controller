@@ -1,30 +1,30 @@
 #include "PureRL_Torque.h"
+#include "../RLController.h"
 
 void PureRL_Torque::configure(const mc_rtc::Configuration & config)
 {
 }
 
-void PureRL_Torque::start(mc_control::fsm::Controller & ctl)
+void PureRL_Torque::start(mc_control::fsm::Controller & ctl_)
 {
-  utils::start_rl_state(ctl, "PureRL_Torque");
-  auto & ctl_rl = static_cast<RLController&>(ctl);
-
-  ctl_rl.datastore().get<std::string>("ControlMode") = "Torque";
-  ctl_rl.useQP = false;
-  ctl_rl.taskType = 1;
-
-  mc_rtc::log::info("using Pure RL (no QP) and Torque control");
+  auto & ctl = static_cast<RLController&>(ctl_);
+  ctl.utils_.start_rl_state(ctl, "PureRL_Torque");
+  ctl.initializeState(true, PURE_RL, true);
+  mc_rtc::log::info("PureRL_Torque state started");
 }
 
-bool PureRL_Torque::run(mc_control::fsm::Controller & ctl)
+bool PureRL_Torque::run(mc_control::fsm::Controller & ctl_)
 {
-  utils::run_rl_state(ctl, "PureRL_Torque");
+  auto & ctl = static_cast<RLController&>(ctl_);
+  ctl.utils_.run_rl_state(ctl, "PureRL_Torque");
+  ctl.tasksComputation(ctl.q_rl);
   return false;
 }
 
-void PureRL_Torque::teardown(mc_control::fsm::Controller & ctl)
+void PureRL_Torque::teardown(mc_control::fsm::Controller & ctl_)
 {
-  utils::teardown_rl_state(ctl, "PureRL_Torque");
+  auto & ctl = static_cast<RLController &>(ctl_);
+  ctl.utils_.teardown_rl_state(ctl, "PureRL_Torque");
 }
 
 EXPORT_SINGLE_STATE("PureRL_Torque", PureRL_Torque)

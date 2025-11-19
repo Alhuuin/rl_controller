@@ -1,28 +1,449 @@
 #include "RLController.h"
 #include <Eigen/src/Core/VectorBlock.h>
+#include <RBDyn/MultiBodyConfig.h>
+#include <SpaceVecAlg/SpaceVecAlg>
 #include <eigen3/Eigen/src/Core/Matrix.h>
+#include <mc_rtc/gui/ArrayInput.h>
 #include <mc_rtc/logging.h>
 #include <mc_rbdyn/configuration_io.h>
 #include <chrono>
 #include <cmath>
+#include <numeric>
+#include <utility>
 
-RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, 
-                           const mc_rtc::Configuration & config)
+
+RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config)
 : mc_control::fsm::Controller(rm, dt, config, Backend::TVM)
 {
   logTiming_ = config("log_timing");
   timingLogInterval_ = config("timing_log_interval");
+  isWalkingPolicy = config("is_walking_policy", false);
 
-  selfCollisionConstraint->setCollisionsDampers(solver(), {1.2, 400.0});
+  //Initialize Constraints
+  addRLConstraints(); // Add constraints specific to the RL policy
+  selfCollisionConstraint->setCollisionsDampers(solver(), {1.2, 200.0});
   solver().removeConstraintSet(dynamicsConstraint);
   dynamicsConstraint = mc_rtc::unique_ptr<mc_solver::DynamicsConstraint>(
-    // new mc_solver::DynamicsConstraint(robots(), 0, {0.1, 0.01, 0.0, 1.2, 400.0}, 0.9, true));
-    new mc_solver::DynamicsConstraint(robots(), 0, timeStep, {0.1, 0.01, 0.5}, 0.9, false, true));
+    new mc_solver::DynamicsConstraint(robots(), 0, {diPercent, dsPercent, 0.0, 1.2, 200.0}, velPercent, true));
   solver().addConstraintSet(dynamicsConstraint);
 
+  // Initialize Tasks
+  FDTask = std::make_shared<mc_tasks::PostureTask>(solver(), robot().robotIndex(), 0.0, 1000.0);
+  FDTask->stiffness(0.0);
+  FDTask->damping(0.0);
+  FDTask->refAccel(refAccel);
+
+
+  torqueTask = std::make_shared<mc_tasks::TorqueTask>(solver(), robot().robotIndex());
+
+  initializeRobot(config);
+  initializeRLPolicy(config);
+  
+  if(useAsyncInference_)
+  {
+    auto & ctl = *this;
+    utils_.startInferenceThread(ctl);
+  }
+
+  addGui();
+  addLog();
+  mc_rtc::log::success("RLController init");
+}
+
+bool RLController::run()
+{
+  counter += timeStep;
+  leftAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("left_ankle_link")].translation();
+  rightAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("right_ankle_link")].translation();
+  ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+  computeLimits();
+
+  auto & real_robot = realRobot(robots()[0].name());
+
+  auto qIn = real_robot.mbc().q;
+  auto alphaIn = real_robot.mbc().alpha;
+  auto tauIn = real_robot.mbc().jointTorque;
+  floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
+  floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
+  Eigen::MatrixXd Kp_inv = current_kp.cwiseInverse().asDiagonal();
+  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+  auto tau_ext = extTorqueSensor.torques();
+
+  bool run = mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
+  robot().forwardKinematics();
+  robot().forwardVelocity();
+  robot().forwardAcceleration();
+  if(!useQP) // Run RL without taking account of the QP
+  {
+    q_cmd = q_rl; // Use the RL position as the commanded position
+    tau_cmd = kp_vector.cwiseProduct(q_rl - currentPos) - kd_vector.cwiseProduct(currentVel);
+    computeRLStateSimulated();
+    updateRobotCmdAfterQP();
+    return true;
+  }
+  // Use QP
+  computeInversePD();
+  updateRobotCmdAfterQP();
+  computeRLStateSimulated();
+  return run; // Return false if QP fails
+}
+
+void RLController::reset(const mc_control::ControllerResetData & reset_data)
+{
+  mc_control::fsm::Controller::reset(reset_data);
+  mc_rtc::log::success("RLController reset completed");
+  // utils_.stopInferenceThread();
+}
+
+void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
+{
+  auto & robot = robots()[0];
+  auto & real_robot = realRobot(robots()[0].name());
+
+  auto q = real_robot.encoderValues();
+  currentPos = Eigen::VectorXd::Map(q.data(), q.size());
+  auto vel = real_robot.encoderVelocities();
+  currentVel = Eigen::VectorXd::Map(vel.data(), vel.size());
+  auto tau = real_robot.jointTorques();
+  currentTau = Eigen::VectorXd::Map(tau.data(), tau.size());
+
+  if(controlledByRL) tau_d = kp_vector.cwiseProduct(currentTargetPosition - currentPos) - kd_vector.cwiseProduct(currentVel);
+  else tau_d = high_kp_vector.cwiseProduct(currentTargetPosition - currentPos) - high_kd_vector.cwiseProduct(currentVel);
+  
+  switch (taskType)
+  {
+    case TORQUE_TASK: // Torque Task
+    {
+      size_t i = 0;
+      for (const auto &joint_name : jointNames)
+      {
+        torque_target[joint_name][0] = tau_d[i];
+        i++;
+      }
+      break;
+    }
+    case FD_TASK: // Forward Dynamics Task
+    {
+      rbd::ForwardDynamics fd(real_robot.mb());
+      fd.computeH(real_robot.mb(), real_robot.mbc());
+      fd.computeC(real_robot.mb(), real_robot.mbc());
+      Eigen::MatrixXd M_w_floatingBase = fd.H();
+      Eigen::VectorXd Cg_w_floatingBase = fd.C();
+      
+      auto extTorqueSensor = robot.device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+      Eigen::VectorXd tau_d_w_floating_base = Eigen::VectorXd::Zero(robot.mb().nrDof());
+      tau_d_w_floating_base.tail(dofNumber) = tau_d.tail(dofNumber);
+      Eigen::VectorXd content = tau_d_w_floating_base - Cg_w_floatingBase; // Add the external torques to the desired torques
+      if(!compensateExternalForces) content += extTorqueSensor.torques();
+      
+      Eigen::VectorXd refAccel_w_floating_base = M_w_floatingBase.llt().solve(content);
+      refAccel = refAccel_w_floating_base.tail(dofNumber); // Exclude the floating base part
+      break;
+    }
+    default:
+      mc_rtc::log::error("Invalid task type: {}", taskType);
+      return;
+  }
+}
+
+void RLController::updateRobotCmdAfterQP()
+{
+  qOut = robot().mbc().q;
+  alphaOut = robot().mbc().alpha;
+  tauOut = robot().mbc().jointTorque;
+
+  floatingBase_qOut = rbd::paramToVector(robot().mb(), qOut);
+  floatingBase_alphaOut = rbd::dofToVector(robot().mb(), alphaOut);
+  floatingBase_tauOut = rbd::dofToVector(robot().mb(), tauOut);
+
+  auto q = qOut;
+  auto alpha = alphaOut;
+  auto tau = tauOut;
+  
+  size_t i = 0;
+  for (const auto &joint_name : jointNames)
+  {
+    q[robot().jointIndexByName(joint_name)][0] = q_cmd[i];
+    alpha[robot().jointIndexByName(joint_name)][0] = 0.0;
+    tau[robot().jointIndexByName(joint_name)][0] = tau_cmd[i];
+    i++;
+  }
+
+  floatingBase_qOutPD = rbd::paramToVector(robot().mb(), q);
+  floatingBase_alphaOutPD = rbd::dofToVector(robot().mb(), alpha);
+  floatingBase_tauOutPD = rbd::dofToVector(robot().mb(), tau);
+
+  // Update q and qdot for position control
+  robot().mbc().q = q;
+  if(controlledByRL) robot().mbc().alpha = alpha; // For RL policy qdot ref = 0
+  // Update joint torques for torque control
+  robot().mbc().jointTorque = tau;
+  // Both are always updated despite they are not used by the robot
+  // They are still used by the QP
+}
+
+void RLController::computeInversePD()
+{
+  // Using QP (TorqueTask or ForwardDynamics Task):  
+  ddot_qp_w_floatingBase = rbd::dofToVector(robot().mb(), robot().mbc().alphaD);
+  ddot_qp = ddot_qp_w_floatingBase.tail(dofNumber); // Exclude the floating base part
+  auto & real_robot = realRobot(robots()[0].name());
+
+  rbd::ForwardDynamics fd(real_robot.mb());
+  fd.computeH(real_robot.mb(), real_robot.mbc());
+  fd.computeC(real_robot.mb(), real_robot.mbc());
+  Eigen::MatrixXd M_w_floatingBase = fd.H();
+  Eigen::VectorXd Cg_w_floatingBase = fd.C();
+
+  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+  Eigen::VectorXd tau_cmd_w_floatingBase = M_w_floatingBase*ddot_qp_w_floatingBase + Cg_w_floatingBase - extTorqueSensor.torques();
+  tau_cmd = tau_cmd_w_floatingBase.tail(dofNumber);
+
+  qddot_rl_simulatedMeasure = M_w_floatingBase.llt().solve(tau_rl + extTorqueSensor.torques() - Cg_w_floatingBase).tail(dofNumber);
+  qdot_rl_simulatedMeasure = currentVel + qddot_rl_simulatedMeasure*timeStep;
+  q_rl_simulatedMeasure += qdot_rl_simulatedMeasure*timeStep;
+
+  Eigen::MatrixXd Kp_inv = current_kp.cwiseInverse().asDiagonal();
+
+  q_cmd = currentPos + Kp_inv*(tau_cmd + current_kd.cwiseProduct(currentVel)); // Inverse PD control to get the commanded position <=> RL position control
+}
+
+void RLController::computeRLStateSimulated()
+{
+  auto & real_robot = realRobot(robots()[0].name());
+  rbd::ForwardDynamics fd(real_robot.mb());
+  fd.computeH(real_robot.mb(), real_robot.mbc());
+  fd.computeC(real_robot.mb(), real_robot.mbc());
+  Eigen::MatrixXd M_w_floatingBase = fd.H();
+  Eigen::VectorXd Cg_w_floatingBase = fd.C();
+
+  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+  tau_rl = kp_vector.cwiseProduct(q_rl - currentPos) - kd_vector.cwiseProduct(currentVel);
+  Eigen::VectorXd tau_rl_w_floating_base = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  tau_rl_w_floating_base.tail(dofNumber) = tau_rl;
+  Eigen::VectorXd content = tau_rl_w_floating_base + extTorqueSensor.torques() - Cg_w_floatingBase; // Add the external torques to the desired torques
+
+  qddot_rl_simulatedMeasure = M_w_floatingBase.llt().solve(content).tail(dofNumber);
+  qdot_rl_simulatedMeasure = currentVel + qddot_rl_simulatedMeasure*timeStep;
+  q_rl_simulatedMeasure = currentPos + qdot_rl_simulatedMeasure*timeStep;
+  tau_err = tau_cmd - tau_rl;
+  tau_err_norm = tau_err.norm();
+  Eigen::VectorXd tau_err_w_floating_base = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  tau_err_w_floating_base.tail(dofNumber) = tau_err;
+  qddot_err = M_w_floatingBase.llt().solve(tau_err_w_floating_base).tail(dofNumber);
+  qddot_err_norm = qddot_err.norm();
+}
+
+void RLController::addLog()
+{
+  // Robot State variables
+  logger().addLogEntry("RLController_refAccel", [this]() { return refAccel; });
+  logger().addLogEntry("RLController_tau_d", [this]() { return tau_d; });
+  logger().addLogEntry("RLController_kp", [this]() { return current_kp; });
+  logger().addLogEntry("RLController_kd", [this]() { return current_kd; });
+  logger().addLogEntry("RLController_currentPos", [this]() { return currentPos; });
+  logger().addLogEntry("RLController_currentVel", [this]() { return currentVel; });
+  logger().addLogEntry("RLController_q_cmd", [this]() { return q_cmd; });
+  logger().addLogEntry("RLController_qddot_qp", [this]() { return ddot_qp; });
+  logger().addLogEntry("RLController_qddot_qp_w_floatingBase", [this]()
+  { return ddot_qp_w_floatingBase; });
+  logger().addLogEntry("RLController_tau_cmd", [this]() { return tau_cmd; });
+
+  // RL variables
+  logger().addLogEntry("RLController_RL_q", [this]() { return q_rl; });
+  logger().addLogEntry("RLController_RL_qSimulatedMeasure", [this]() { return q_rl_simulatedMeasure; });
+  logger().addLogEntry("RLController_RL_qdotSimulatedMeasure", [this]() { return qdot_rl_simulatedMeasure; });
+  logger().addLogEntry("RLController_RL_qddotSimulatedMeasure", [this]() { return qddot_rl_simulatedMeasure; });
+  logger().addLogEntry("RLController_tauRL", [this]() { return tau_rl; });
+  logger().addLogEntry("RLController_pastAction", [this]() { return a_simuOrder; });
+  logger().addLogEntry("RLController_qZero", [this]() { return q_zero_vector; });
+  logger().addLogEntry("RLController_a_before", [this]() { return a_before_vector; });
+  logger().addLogEntry("RLController_currentObservation", [this]() { return currentObservation_; });
+  logger().addLogEntry("RLController_a_vector", [this]() { return a_vector; });
+  logger().addLogEntry("RLController_a_simulationOrder", [this]() { return a_simuOrder; });
+  logger().addLogEntry("RLController_currentAction", [this]() { return currentAction_; });
+  logger().addLogEntry("RLController_latestAction", [this]() { return latestAction_; });
+  logger().addLogEntry("RLController_baseAngVel", [this]() { return baseAngVel; });
+  logger().addLogEntry("RLController_rpy", [this]() { return rpy; });
+  logger().addLogEntry("RLController_legPos", [this]() { return legPos; });
+  logger().addLogEntry("RLController_legVel", [this]() { return legVel; });
+  logger().addLogEntry("RLController_legAction", [this]() { return legAction; });
+  logger().addLogEntry("RLController_phase", [this]() { return phase_; });
+  
+  // Controller state variables
+  logger().addLogEntry("RLController_useQP", [this]() { return useQP; });
+  logger().addLogEntry("RLController_controlledByRL", [this]() { return controlledByRL; });
+  logger().addLogEntry("RLController_taskType", [this]() { return taskType; });
+
+  // RL Controller
+  logger().addLogEntry("RLController_q_lim_upper", [this]() { return jointLimitsPos_upper; });
+  logger().addLogEntry("RLController_q_lim_lower", [this]() { return jointLimitsPos_lower; });
+  logger().addLogEntry("RLController_qdot_lim_upper", [this]() { return jointLimitsVel_upper; });
+  logger().addLogEntry("RLController_qdot_lim_lower", [this]() { return jointLimitsVel_lower; });
+  logger().addLogEntry("RLController_qdot_limHard_upper", [this]() { return jointLimitsHardVel_upper; });
+  logger().addLogEntry("RLController_qdot_limHard_lower", [this]() { return jointLimitsHardVel_lower; });
+  logger().addLogEntry("RLController_ankleDistanceNorm", [this]() { return ankleDistanceNorm; });
+  logger().addLogEntry("RLController_limitBreached_q_soft_upper", [this]() { return limitBreached_q_soft_upper; });
+  logger().addLogEntry("RLController_limitBreached_q_soft_lower", [this]() { return limitBreached_q_soft_lower; });
+  logger().addLogEntry("RLController_limitBreached_q_hard_upper", [this]() { return limitBreached_q_hard_upper; });
+  logger().addLogEntry("RLController_limitBreached_q_hard_lower", [this]() { return limitBreached_q_hard_lower; });
+  logger().addLogEntry("RLController_limitBreached_qdot_soft_upper", [this]() { return limitBreached_qDot_soft_upper; });
+  logger().addLogEntry("RLController_limitBreached_qdot_soft_lower", [this]() { return limitBreached_qDot_soft_lower; });
+  logger().addLogEntry("RLController_limitBreached_qdot_hard_upper", [this]() { return limitBreached_qDot_hard_upper; });
+  logger().addLogEntry("RLController_limitBreached_qdot_hard_lower", [this]() { return limitBreached_qDot_hard_lower; });
+  logger().addLogEntry("RLController_limitBreached_tau_hard_upper", [this]() { return limitBreached_tau_upper; });
+  logger().addLogEntry("RLController_limitBreached_tau_hard_lower", [this]() { return limitBreached_tau_lower; });
+  logger().addLogEntry("RLController_tau_err", [this]() { return tau_err; });
+  logger().addLogEntry("RLController_tau_err_norm", [this]() { return tau_err_norm; });
+  logger().addLogEntry("RLController_qddot_err", [this]() { return qddot_err; }); 
+  logger().addLogEntry("RLController_qddot_err_norm", [this]() { return qddot_err_norm; });
+  std::vector<double> qOut_vec(robot().refJointOrder().size(), 0);
+  logger().addLogEntry("RLController_qOutNoModification", [this, qOut_vec]() mutable -> const std::vector<double> &
+                         {
+                           auto & robot = this->robot();
+                           for(size_t i = 0; i < qOut_vec.size(); ++i)
+                           {
+                             auto mbcIndex = robot.jointIndexInMBC(i);
+                             if(mbcIndex != -1) { qOut_vec[i] = qOut[static_cast<size_t>(mbcIndex)][0]; }
+                           }
+                           return qOut_vec;
+                         });
+  std::vector<double> alphaOut_vec(robot().refJointOrder().size(), 0);
+  logger().addLogEntry("RLController_alphaOutNoModification", [this, alphaOut_vec]() mutable -> const std::vector<double> &
+                         {
+                           auto & robot = this->robot();
+                           for(size_t i = 0; i < alphaOut_vec.size(); ++i)
+                           {
+                             auto mbcIndex = robot.jointIndexInMBC(i);
+                             if(mbcIndex != -1) { alphaOut_vec[i] = alphaOut[static_cast<size_t>(mbcIndex)][0]; }
+                           }
+                           return alphaOut_vec;
+                         });
+  std::vector<double> tauOut_vec(robot().refJointOrder().size(), 0);
+  logger().addLogEntry("RLController_tauOutNoModification", [this, tauOut_vec]() mutable -> const std::vector<double> &
+                         {
+                           auto & robot = this->robot();
+                           for(size_t i = 0; i < tauOut_vec.size(); ++i)
+                           {
+                             auto mbcIndex = robot.jointIndexInMBC(i);
+                             if(mbcIndex != -1) { tauOut_vec[i] = tauOut[static_cast<size_t>(mbcIndex)][0]; }
+                           }
+                           return tauOut_vec;
+                         });
+
+  logger().addLogEntry("RLController_floatingBase_qOutNoModification", [this]() { return floatingBase_qOut; });
+  logger().addLogEntry("RLController_floatingBase_alphaOutNoModification", [this]() { return floatingBase_alphaOut; });
+  logger().addLogEntry("RLController_floatingBase_tauOutNoModification", [this]() { return floatingBase_tauOut; });
+  logger().addLogEntry("RLController_floatingBase_qOutPD", [this]() { return floatingBase_qOutPD; });
+  logger().addLogEntry("RLController_floatingBase_alphaOutPD", [this]() { return floatingBase_alphaOutPD; });
+  logger().addLogEntry("RLController_floatingBase_tauOutPD", [this]() { return floatingBase_tauOutPD; });
+  logger().addLogEntry("RLController_floatingBase_qIn", [this]() { return floatingBase_qIn; });
+  logger().addLogEntry("RLController_floatingBase_alphaIn", [this]() { return floatingBase_alphaIn; });
+}
+
+void RLController::addGui()
+{
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::Checkbox("Compensate External Forces", compensateExternalForces));
+  // Add a button to change the velocity command
+  gui()->addElement({"FSM", "Options"},
+  mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL_));
+}
+
+void RLController::initializeRobot(const mc_rtc::Configuration & config)
+{
+  // H1 joints in mc_rtc/URDF order (based on unitree_sdk2 reorder_obs function)
+  mcRtcJointsOrder = {
+    "left_hip_yaw_joint",      
+    "left_hip_roll_joint",       
+    "left_hip_pitch_joint",    
+    "left_knee_joint",         
+    "left_ankle_joint",        
+    "right_hip_yaw_joint",     
+    "right_hip_roll_joint",    
+    "right_hip_pitch_joint",   
+    "right_knee_joint",        
+    "right_ankle_joint",       
+    "torso_joint",             
+    "left_shoulder_pitch_joint",  
+    "left_shoulder_roll_joint",     
+    "left_shoulder_yaw_joint",    
+    "left_elbow_joint",           
+    "right_shoulder_pitch_joint", 
+    "right_shoulder_roll_joint",  
+    "right_shoulder_yaw_joint",   
+    "right_elbow_joint"           
+  };
+
+  notControlledJoints = {
+    "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "right_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_elbow_joint",
+    "torso_joint"
+  };
+
   dofNumber = robot().mb().nrDof() - 6; // Remove the floating base part (6 DoF)
+
+  auto & real_robot = realRobot(robots()[0].name());
+
+  leftAnklePos = real_robot.collisionTransform("left_ankle_link").translation();
+  rightAnklePos = real_robot.collisionTransform("right_ankle_link").translation();
+  ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+
+  jointLimitsHardPos_upper = Eigen::VectorXd::Zero(dofNumber);
+  jointLimitsHardPos_lower = Eigen::VectorXd::Zero(dofNumber);
+  jointLimitsHardVel_upper = Eigen::VectorXd::Zero(dofNumber);
+  jointLimitsHardVel_lower = Eigen::VectorXd::Zero(dofNumber);
+  jointLimitsHardTau_upper = Eigen::VectorXd::Zero(dofNumber);
+  jointLimitsHardTau_lower = Eigen::VectorXd::Zero(dofNumber);
+
+  limitBreached_q_soft_upper = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_q_soft_lower = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_q_hard_upper = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_q_hard_lower = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_qDot_soft_upper = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_qDot_soft_lower = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_qDot_hard_upper = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_qDot_hard_lower = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_tau_upper = Eigen::VectorXd::Zero(dofNumber);
+  limitBreached_tau_lower = Eigen::VectorXd::Zero(dofNumber);
+
+  for (size_t i = 0 ; i < robot().refJointOrder().size() ; i++)
+  {
+    const std::string & jname = robot().refJointOrder()[i];
+    auto mcJointId = robot().jointIndexByName(jname);
+    if (robot().mbc().q[mcJointId].empty())
+      continue;
+    
+    jointLimitsHardPos_lower(i) = robot().ql().at(mcJointId)[0];
+    jointLimitsHardPos_upper(i) = robot().qu().at(mcJointId)[0];
+    jointLimitsHardVel_lower(i) = robot().vl().at(mcJointId)[0];
+    jointLimitsHardVel_upper(i) = robot().vu().at(mcJointId)[0];
+    jointLimitsHardTau_lower(i) = robot().tl().at(mcJointId)[0];
+    jointLimitsHardTau_upper(i) = robot().tu().at(mcJointId)[0];
+  }
+
+  jointLimitsPos_upper = jointLimitsHardPos_upper - (jointLimitsHardPos_upper - jointLimitsHardPos_lower)*dsPercent;
+  jointLimitsPos_lower = jointLimitsHardPos_lower + (jointLimitsHardPos_upper - jointLimitsHardPos_lower)*dsPercent;
+
+  jointLimitsVel_upper = jointLimitsHardVel_upper*velPercent;
+  jointLimitsVel_lower = jointLimitsHardVel_lower*velPercent;
+
+  mc_rtc::log::info("[RLController] Joint limits pos upper: {}", jointLimitsPos_upper.transpose());
+  mc_rtc::log::info("[RLController] Joint limits pos lower: {}", jointLimitsPos_lower.transpose());
+  mc_rtc::log::info("[RLController] Joint limits vel upper: {}", jointLimitsVel_upper.transpose());
+  mc_rtc::log::info("[RLController] Joint limits vel lower: {}", jointLimitsVel_lower.transpose());
   refAccel = Eigen::VectorXd::Zero(dofNumber); // TVM
-  q_rl_vector = Eigen::VectorXd::Zero(dofNumber);
+  q_rl = Eigen::VectorXd::Zero(dofNumber);
+  q_rl_simulatedMeasure = Eigen::VectorXd::Zero(dofNumber);
+  qdot_rl_simulatedMeasure = Eigen::VectorXd::Zero(dofNumber);
+  qddot_rl_simulatedMeasure = Eigen::VectorXd::Zero(dofNumber);
+  tau_rl = Eigen::VectorXd::Zero(dofNumber);
   q_zero_vector = Eigen::VectorXd::Zero(dofNumber);
   tau_d = Eigen::VectorXd::Zero(dofNumber);
   kp_vector = Eigen::VectorXd::Zero(dofNumber);
@@ -31,20 +452,16 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   high_kd_vector = Eigen::VectorXd::Zero(dofNumber);
   currentPos = Eigen::VectorXd::Zero(dofNumber);
   currentVel = Eigen::VectorXd::Zero(dofNumber);
+  currentTau = Eigen::VectorXd::Zero(dofNumber);
 
   ddot_qp = Eigen::VectorXd::Zero(dofNumber); // Desired acceleration in the QP solver
   ddot_qp_w_floatingBase = Eigen::VectorXd::Zero(robot().mb().nrDof()); // Desired acceleration in the QP solver with floating base
-  q_cmd = Eigen::VectorXd::Zero(dofNumber); // The commended position send to the internal PD of the robot
-  tau_cmd_after_pd = Eigen::VectorXd::Zero(dofNumber); // The commended position after PD control
   
-  FDTask = std::make_shared<mc_tasks::PostureTask>(solver(), robot().robotIndex(), 0.0, 1000.0);
-  FDTask->weight(1000.0);
-  FDTask->stiffness(0.0);
-  FDTask->damping(0.0);
-  FDTask->refAccel(refAccel);
-
-  torqueTask = std::make_shared<mc_tasks::TorqueTask>(solver(), robot().robotIndex());
-
+  tau_cmd = Eigen::VectorXd::Zero(dofNumber); // Final torque that control the robot
+  q_cmd = Eigen::VectorXd::Zero(dofNumber); // The commended position send to the internal PD of the robot
+  tau_err = Eigen::VectorXd::Zero(dofNumber);
+  qddot_err = Eigen::VectorXd::Zero(dofNumber);
+  
   // Get the gains from the configuration or set default values
   std::map<std::string, double> kp = config("kp");
   std::map<std::string, double> kd = config("kd");
@@ -53,7 +470,7 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   std::map<std::string, double> high_kd = config("high_kd");
 
   // Get the default posture target from the robot's posture task
-  FSMPostureTask = getPostureTask(robot().name());
+  std::shared_ptr<mc_tasks::PostureTask> FSMPostureTask = getPostureTask(robot().name());
   auto posture = FSMPostureTask->posture();
   size_t i = 0;
   std::vector<std::string> joint_names;
@@ -68,27 +485,58 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
             kd_vector[i] = kd.at(joint_name);
             high_kp_vector[i] = high_kp.at(joint_name);
             high_kd_vector[i] = high_kd.at(joint_name);
-            q_rl_vector[i] = t[0];
+            q_rl[i] = t[0];
             q_zero_vector[i] = t[0];
             torque_target[joint_name] = {0.0};
-            mc_rtc::log::info("[RLController] Joint {}: currentTargetPosition {}, kp {}, kd {}", joint_name, q_rl_vector[i], kp_vector[i], kd_vector[i]);
+            mc_rtc::log::info("[RLController] Joint {}: currentTargetPosition {}, kp {}, kd {}", joint_name, q_rl[i], kp_vector[i], kd_vector[i]);
             i++;
         }
       }
   }
+  current_kp = high_kp_vector;
+  current_kd = high_kd_vector;
   solver().removeTask(FSMPostureTask);
+  datastore().make<std::string>("ControlMode", "Torque");
+  if(!datastore().has("anchorFrameFunction"))
+  {
+    datastore().make_call("anchorFrameFunction", [this](const mc_rbdyn::Robot & robot) {return createContactAnchor(robot);});
+  }
 
+  // State after QP without any modification
+  qOut = robot().mbc().q;
+  alphaOut = robot().mbc().alpha;
+  tauOut = robot().mbc().jointTorque;
+
+  floatingBase_qIn = Eigen::VectorXd::Zero(robot().mb().nrParams());
+  floatingBase_alphaIn = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  floatingBase_qOut = Eigen::VectorXd::Zero(robot().mb().nrParams());
+  floatingBase_alphaOut = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  floatingBase_tauOut = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  floatingBase_qOutPD = Eigen::VectorXd::Zero(robot().mb().nrParams());
+  floatingBase_alphaOutPD = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  floatingBase_tauOutPD = Eigen::VectorXd::Zero(robot().mb().nrDof());
+
+  floatingBase_qOut = rbd::paramToVector(robot().mb(), qOut);
+  floatingBase_alphaOut = rbd::dofToVector(robot().mb(), alphaOut);
+  floatingBase_tauOut = rbd::paramToVector(robot().mb(), tauOut);
+  floatingBase_qOutPD = floatingBase_qOut;
+  floatingBase_alphaOutPD = floatingBase_alphaOut;
+  floatingBase_tauOutPD = floatingBase_tauOut;
+  auto qIn = real_robot.mbc().q;
+  auto alphaIn = real_robot.mbc().alpha;
+  floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
+  floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
+}
+
+void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
+{
   auto & real_robot = realRobot(robots()[0].name());
 
   baseAngVel = real_robot.bodyVelW("pelvis").angular();
   Eigen::Matrix3d baseRot = real_robot.bodyPosW("pelvis").rotation();
   rpy = mc_rbdyn::rpyFromMat(baseRot);
     
-  mc_rtc::log::info("[RLController] Posture target initialized with {} joints", dofNumber);
-
-  datastore().make<std::string>("ControlMode", "Torque");
-  initializeAllJoints();
-  a_simuOrder = Eigen::VectorXd::Zero(dofNumber);
+  mc_rtc::log::info("[RLController] Posture target initialized with {} joints", dofNumber); 
 
   // Initialize reference position and last actions for action blending
   a_before_vector = Eigen::VectorXd::Zero(dofNumber);
@@ -100,25 +548,21 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   a_simuOrder = Eigen::VectorXd::Zero(dofNumber);
 
   mc_rtc::log::info("Reference position initialized with {} joints", q_zero_vector.size());
-
-  lastInferenceTime_ = std::chrono::steady_clock::now();
-  q_rl_vector = q_zero_vector;  // Start with reference position
-  targetPositionValid_ = true;
+  q_rl = q_zero_vector;  // Start with reference position
   
   useAsyncInference_ = config("use_async_inference", true);
   mc_rtc::log::info("Async RL inference: {}", useAsyncInference_ ? "enabled" : "disabled");
-  
-  shouldStopInference_ = false;
-  newObservationAvailable_ = false;
-  newActionAvailable_ = false;
-  currentObservation_ = Eigen::VectorXd::Zero(40);
   currentAction_ = Eigen::VectorXd::Zero(dofNumber);
   latestAction_ = Eigen::VectorXd::Zero(dofNumber);
   
   // Initialize new observation components
-  cmd_ = Eigen::Vector3d::Zero();  // Default command (x, y, yaw)
+  velCmdRL_ = Eigen::Vector3d::Zero();  // Default command (x, y, yaw)
+  // Values for the aggressive trot
+  // velCmdRL_(0) = 1.09;
+  // velCmdRL_(1) = 0.6;
+  // velCmdRL_(2) = 0.5;
+  // velCmdRL_(1) = -20;
   phase_ = 0.0;  // Phase for periodic gait
-  phaseFreq_ = 1.2;  // Phase frequency in Hz
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
   
   // Initialize external force application (hardcoded for testing)
@@ -133,25 +577,22 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
   }
   
   std::string policyPath = config("policy_path", std::string(""));
-  if(!policyPath.empty())
-  {
-    mc_rtc::log::info("Loading RL policy from: {}", policyPath);
-    try {
-      rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPath);
-      if(rlPolicy_) {
-        mc_rtc::log::success("RL policy loaded successfully");
-      } else {
-        mc_rtc::log::error("RL policy creation failed - policy is null");
-      }
-    } catch(const std::exception& e) {
-      mc_rtc::log::error("Failed to load RL policy: {}", e.what());
-      rlPolicy_ = std::make_unique<RLPolicyInterface>(); // Fallback to dummy policy
+  if(policyPath.empty())
+    policyPath = "policy.onnx"; // Default policy path if not specified in config
+
+  mc_rtc::log::info("Loading RL policy from: {}", policyPath);
+  try {
+    rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPath);
+    if(rlPolicy_) {
+      mc_rtc::log::success("RL policy loaded successfully");
+      // Initialize observation vector with the correct size from the loaded policy
+      currentObservation_ = Eigen::VectorXd::Zero(rlPolicy_->getObservationSize());
+      mc_rtc::log::info("Initialized observation vector with size: {}", rlPolicy_->getObservationSize());
+    } else {
+      mc_rtc::log::error_and_throw("RL policy creation failed - policy is null");
     }
-  }
-  else
-  {
-    mc_rtc::log::warning("No policy_path specified in config, creating dummy policy");
-    rlPolicy_ = std::make_unique<RLPolicyInterface>();
+  } catch(const std::exception& e) {
+    mc_rtc::log::error_and_throw("Failed to load RL policy: {}", e.what());
   }
 
   std::string simulator = config("Simulator", std::string(""));
@@ -193,627 +634,243 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
     usedJoints_simuOrder = std::vector<int>(dofNumber);
     std::iota(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end(), 0);
   }
-  
-  if(useAsyncInference_)
-  {
-    startInferenceThread();
-  }
-
-  logging();
-
-  mc_rtc::log::success("RLController init");
 }
 
-void RLController::logging()
+std::tuple<Eigen::VectorXd, Eigen::VectorXd> RLController::getPDGains()
 {
-  logger().addLogEntry("RLController_refAccel", [this]() { return refAccel; });
-  logger().addLogEntry("RLController_currentTargetPosition", [this]() { return q_rl_vector; });
-  logger().addLogEntry("RLController_tau_d", [this]() { return tau_d; });
-  logger().addLogEntry("RLController_kp", [this]() { return kp_vector; });
-  logger().addLogEntry("RLController_kd", [this]() { return kd_vector; });
-  logger().addLogEntry("RLController_currentPos", [this]() { return currentPos; });
-  logger().addLogEntry("RLController_currentVel", [this]() { return currentVel; });
-  logger().addLogEntry("RLController_q_cmd", [this]() { return q_cmd; });
-  logger().addLogEntry("RLController_ddot_qp", [this]() { return ddot_qp; });
-  logger().addLogEntry("RLController_ddot_qp_w_floatingBase", [this]()
-  { return ddot_qp_w_floatingBase; });
-
-  logger().addLogEntry("RLController_tau_cmd_after_pd_positionCtl", [this]() { return tau_cmd_after_pd; });
-
-  logger().addLogEntry("RLController_pastAction", [this]() { return a_simuOrder; });
-  logger().addLogEntry("RLController_qZero", [this]() { return q_zero_vector; });
-  logger().addLogEntry("RLController_a_before", [this]() { return a_before_vector; });
-  logger().addLogEntry("RLController_currentObservation", [this]() { return currentObservation_; });
-  logger().addLogEntry("RLController_a_vector", [this]() { return a_vector; });
-  logger().addLogEntry("RLController_a_simulationOrder", [this]() { return a_simuOrder; });
-  logger().addLogEntry("RLController_currentAction", [this]() { return currentAction_; });
-  logger().addLogEntry("RLController_latestAction", [this]() { return latestAction_; });
-  logger().addLogEntry("RLController_baseAngVel", [this]() { return baseAngVel; });
-  logger().addLogEntry("RLController_rpy", [this]() { return rpy; });
-  logger().addLogEntry("RLController_legPos", [this]() { return legPos; });
-  logger().addLogEntry("RLController_legVel", [this]() { return legVel; });
-  logger().addLogEntry("RLController_legAction", [this]() { return legAction; });
-  logger().addLogEntry("RLController_cmd", [this]() { return cmd_; });
-  logger().addLogEntry("RLController_phase", [this]() { return phase_; });
-
-  // External force logging
-  logger().addLogEntry("RLController_pelvisForceEnabled", [this]() { return pelvisForceEnabled_; });
-  logger().addLogEntry("RLController_pelvisForce", [this]() { return pelvisForce_; });
-
-  gui()->addElement({"FSM", "Options"},
-    mc_rtc::gui::Checkbox("External torques", compensateExternalForces));
-  
-  // Add external force controls
-  gui()->addElement({"FSM", "External Forces"},
-    mc_rtc::gui::Button("Debug Force Interface", 
-      [this]() { 
-        mc_rtc::log::info("[RLController] === Force Interface Debug ===");
-        mc_rtc::log::info("[RLController] Robot name: '{}'", robot().name());
-        
-        // Check for mc_mujoco interface
-        std::string call_name = robot().name() + "::ApplyForcesOnBody";
-        bool has_interface = datastore().has(call_name);
-        mc_rtc::log::info("[RLController] mc_mujoco interface '{}': {}", call_name, has_interface ? "AVAILABLE" : "NOT FOUND");
-        
-        // List robot bodies
-        mc_rtc::log::info("[RLController] Robot bodies:");
-        for(const auto & body : robot().mb().bodies()) {
-          mc_rtc::log::info("[RLController]   - '{}'", body.name());
-        }
-        
-        // Test force application
-        if(has_interface) {
-          mc_rtc::log::info("[RLController] Testing force application...");
-          const sva::ForceVecd test_wrench(Eigen::Vector3d::Zero(), Eigen::Vector3d(0, 0, -100));
-          try {
-            const std::string body_name = "pelvis";  // Use const std::string& 
-            // Pass Eigen::Vector3d by value (copy constructor)
-            Eigen::Vector3d localPos(0, 0, 0);  // Create variable, not temporary
-            bool success = datastore().call<bool>(call_name, body_name, test_wrench, std::move(localPos));
-            mc_rtc::log::info("[RLController] Force application test: {}", success ? "SUCCESS" : "FAILED");
-          } catch(const std::exception & e) {
-            mc_rtc::log::error("[RLController] Force application test EXCEPTION: {}", e.what());
-          }
-        }
-        mc_rtc::log::info("[RLController] === End Debug ===");
-      }));
-      
-  gui()->addElement({"FSM", "External Forces"},
-    mc_rtc::gui::Button("Toggle Pelvis Force", 
-      [this]() { 
-        pelvisForceEnabled_ = !pelvisForceEnabled_;
-        mc_rtc::log::info("[RLController] Pelvis force {}", pelvisForceEnabled_ ? "enabled" : "disabled");
-      }));
-      
-  gui()->addElement({"FSM", "External Forces"},
-    mc_rtc::gui::Button("Apply 100N Down Force", 
-      [this]() { 
-        pelvisForce_ = Eigen::Vector3d(0, 0, -100);
-        applyPelvisForce();
-        mc_rtc::log::info("[RLController] Applied 100N downward force to pelvis");
-      }));
+  std::string robot_name = robot().name();
+  std::vector<double> proportionalGains_vec(kp_vector.data(), kp_vector.data() + kp_vector.size());
+  std::vector<double> dampingGains_vec(kd_vector.data(), kd_vector.data() + kd_vector.size());
+  datastore().call<bool>(robot_name + "::GetPDGains", proportionalGains_vec, dampingGains_vec);
+  Eigen::VectorXd p_vec = Eigen::VectorXd::Map(proportionalGains_vec.data(), proportionalGains_vec.size());
+  Eigen::VectorXd d_vec = Eigen::VectorXd::Map(dampingGains_vec.data(), dampingGains_vec.size());
+  mc_rtc::log::info("[RLController] Current PD Gains for {} are:\n\tkp = {}\n\tkd = {}", robot_name, p_vec.transpose(), d_vec.transpose());
+  return std::make_tuple(p_vec, d_vec);
 }
 
-RLController::~RLController()
+bool RLController::setPDGains(Eigen::VectorXd p_vec, Eigen::VectorXd d_vec)
 {
-  stopInferenceThread();
-  mc_rtc::log::info("RLController destroyed");
+  std::string robot_name = robot().name();
+  // Update kp and kd use by the controller
+  current_kp = p_vec;
+  current_kd = d_vec;
+
+  // Update kp and kd use by the robot or simulator (Internal PD)
+  mc_rtc::log::info("[RLController] Setting PD gains for {}:\n\tkp = {}\n\tkd = {}", robot_name, p_vec.transpose(), d_vec.transpose());
+  const std::vector<double> proportionalGains_vec(p_vec.data(), p_vec.data() + p_vec.size());
+  const std::vector<double> dampingGains_vec(d_vec.data(), d_vec.data() + d_vec.size());
+  return datastore().call<bool>(robot_name + "::SetPDGains", proportionalGains_vec, dampingGains_vec);
 }
 
-bool RLController::run()
+bool RLController::isHighGain(double tol)
 {
-  if (compensateExternalForcesHasChanged != compensateExternalForces)
-  {
-    mc_rtc::log::info("Compensate external forces: {}", compensateExternalForces);
+  // Update kp and kd use by the controller
+  std::tie(current_kp, current_kd) = getPDGains();
+  // Check if the current gains are close to the low gains
+  bool lowGain = ((current_kp - kp_vector).norm() < tol) && ((current_kd - kd_vector).norm() < tol);
+  bool highGain = !lowGain;
+  mc_rtc::log::info("[RLController] current_kp: {}", current_kp.transpose());
+  mc_rtc::log::info("[RLController] current_kd: {}", current_kd.transpose());
+  mc_rtc::log::info("[RLController] kp_vector: {}", kp_vector.transpose());
+  mc_rtc::log::info("[RLController] kd_vector: {}", kd_vector.transpose());
+  mc_rtc::log::info("[RLController] isHighGain: {}", highGain);
+  return highGain;
+}
+
+void RLController::initializeState(bool torque_control, int task_type, bool controlled_by_rl)
+{
+  if(torque_control) datastore().get<std::string>("ControlMode") = "Torque";
+  else datastore().get<std::string>("ControlMode") = "Position";
+
+  if (!datastore().call<bool>("EF_Estimator::isActive")) {
     datastore().call("EF_Estimator::toggleActive");
-    compensateExternalForcesHasChanged = compensateExternalForces;
-  }
-  bool run = mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
-  robot().forwardKinematics();
-  robot().forwardVelocity();
-  robot().forwardAcceleration();
-
-  auto q = robot().encoderValues();
-  currentPos = Eigen::VectorXd::Map(q.data(), q.size());
-  auto vel = robot().encoderVelocities();
-  currentVel = Eigen::VectorXd::Map(vel.data(), vel.size());
-
-  // Apply external forces if enabled
-  if(pelvisForceEnabled_) {
-    static int force_call_counter = 0;
-    force_call_counter++;
-    if(force_call_counter % 1000 == 0) {
-      mc_rtc::log::info("[RLController] Pelvis force enabled, calling applyPelvisForce() #{}", force_call_counter);
-    }
-    applyPelvisForce();
   }
 
-  auto ctrl_mode = datastore().get<std::string>("ControlMode");
-  if (ctrl_mode.compare("Position") == 0)
-    return positionControl(run);
-  return torqueControl(run); // = ctrl_mode.compare("Torque") == 0 :
-}
-
-bool RLController::positionControl(bool run)
-{
-  
-  rbd::paramToVector(robot().mbc().alphaD, ddot_qp_w_floatingBase);
-  ddot_qp = ddot_qp_w_floatingBase.tail(dofNumber); // Exclude the floating base part
-
-  // Use robot instead of realrobot because we are after the QP
-  rbd::ForwardDynamics fd(robot().mb());
-  fd.computeH(robot().mb(), robot().mbc());
-  fd.computeC(robot().mb(), robot().mbc());
-  Eigen::MatrixXd M_w_floatingBase = fd.H();
-  Eigen::VectorXd Cg_w_floatingBase = fd.C();
-  Eigen::MatrixXd M = M_w_floatingBase.bottomRightCorner(dofNumber, dofNumber);
-  Eigen::VectorXd Cg = Cg_w_floatingBase.tail(dofNumber);
-
-  Eigen::MatrixXd Kp_inv = kp_vector.cwiseInverse().asDiagonal();
-
-  q_cmd = currentPos + Kp_inv*(M*ddot_qp + Cg + kd_vector.cwiseProduct(currentVel));
-  
-  auto q = robot().mbc().q;
-  auto alpha = robot().mbc().alpha;
-
-  if (useQP)
+  useQP = true;
+  if(task_type == PURE_RL) useQP = false;
+  else taskType = task_type;
+  controlledByRL = controlled_by_rl;
+  if(controlledByRL)
   {
-    size_t i = 0;
-    for (const auto &joint_name : jointNames)
-    {
-      q[robot().jointIndexByName(joint_name)][0] = q_cmd[i];
-      alpha[robot().jointIndexByName(joint_name)][0] = 0.0;
-      i++;
-    }
-
-    robot().mbc().q = q; // Update the mbc with the new position
-    //robot().mbc().alpha = alpha; // Update the mbc with the new velocity
-    return run;
+    // Set low gains for RL
+    if(isHighGain()) setPDGains(kp_vector, kd_vector);
+    tasksComputation(q_rl);
   }
   else
   {
-    size_t i = 0;
-    for (const auto &joint_name : jointNames)
+    // Set high gains for model-based control
+    if(!isHighGain()) setPDGains(high_kp_vector, high_kd_vector);
+    tasksComputation(q_zero_vector);
+  }
+}
+
+void RLController::computeLimits()
+{
+  bool hardBreached = false;
+  double epsilon = 1e-5;
+  for (size_t i = 0; i < dofNumber; ++i)
+  {
+    // q lim
+    hardBreached = false;
+    limitBreached_q_hard_upper(i) = 0.0;
+    if(currentPos(i) > jointLimitsHardPos_upper(i) + epsilon)
     {
-      q[robot().jointIndexByName(joint_name)][0] = q_rl_vector[i];
-      alpha[robot().jointIndexByName(joint_name)][0] = 0.0; // Set velocity to zero for position control
-      i++;
+      limitBreached_q_hard_upper(i) = 1.0;
+      mc_rtc::log::info("t= {}s; Joint {} position upper hard limit breached: currentPos = {}, limit = {}", counter, jointNames[i], currentPos(i), jointLimitsHardPos_upper(i));
+      hardBreached = true;
     }
 
-    robot().mbc().q = q; // Update the mbc with the new position
-    //robot().mbc().alpha = alpha; // Update the mbc with the new velocity
-    return true;
-  }
-}
-
-bool RLController::torqueControl(bool run) //TODO:only keep rl -> rest in state
-{
-  if (useQP == false)
-  {
-    auto tau = robot().mbc().jointTorque;
-    tau_d = kp_vector.cwiseProduct(q_rl_vector - currentPos) - kd_vector.cwiseProduct(currentVel);
-    
-    size_t i = 0;
-    for (const auto &joint_name : jointNames)
+    limitBreached_q_soft_upper(i) = 0.0;
+    if(currentPos(i) > jointLimitsPos_upper(i) + epsilon)
     {
-      tau[robot().jointIndexByName(joint_name)][0] = tau_d[i];
-      i++;
+      limitBreached_q_soft_upper(i) = 1.0;
+      if(!hardBreached) mc_rtc::log::info("t= {}s; Joint {} position upper soft limit breached: currentPos = {}, limit = {}", counter, jointNames[i], currentPos(i), jointLimitsPos_upper(i));
     }
-
-    robot().mbc().jointTorque = tau; // Update the mbc with the new position
-    return true;
-  }
-  else { 
-    return run;
-  }
-}
-
-void RLController::reset(const mc_control::ControllerResetData & reset_data)
-{
-  mc_control::fsm::Controller::reset(reset_data);
-  mc_rtc::log::success("RLController reset completed");
-}
-
-void RLController::initializeAllJoints()
-{
-  // H1 joints in mc_rtc/URDF order (based on unitree_sdk2 reorder_obs function)
-  mcRtcJointsOrder = {
-    "left_hip_yaw_joint",      
-    "left_hip_roll_joint",       
-    "left_hip_pitch_joint",    
-    "left_knee_joint",         
-    "left_ankle_joint",        
-    "right_hip_yaw_joint",     
-    "right_hip_roll_joint",    
-    "right_hip_pitch_joint",   
-    "right_knee_joint",        
-    "right_ankle_joint",       
-    "torso_joint",             
-    "left_shoulder_pitch_joint",  
-    "left_shoulder_roll_joint",     
-    "left_shoulder_yaw_joint",    
-    "left_elbow_joint",           
-    "right_shoulder_pitch_joint", 
-    "right_shoulder_roll_joint",  
-    "right_shoulder_yaw_joint",   
-    "right_elbow_joint"           
-  };
-
-  notControlledJoints = {
-    "left_shoulder_pitch_joint",
-    "right_shoulder_pitch_joint",
-    "left_shoulder_roll_joint",
-    "right_shoulder_roll_joint",
-    "left_shoulder_yaw_joint",
-    "right_shoulder_yaw_joint",
-    "left_elbow_joint",
-    "right_elbow_joint",
-    "torso_joint"
-  };
-}
-
-Eigen::VectorXd RLController::getCurrentObservation()
-{
-  // Observation: [base angular velocity (3), roll (1), pitch (1), joint pos (10), joint vel (10), past action (10), sin(phase) (1), cos(phase) (1), command (3)]
-
-  Eigen::VectorXd obs(40);
-  obs = Eigen::VectorXd::Zero(40);
-
-  // const auto & robot = this->robot();
-
-  auto & robot = robots()[0];
-  auto & real_robot = realRobot(robots()[0].name());
-  
-  //  Eigen::Vector3d baseAngVel = real_robot.bodyVelW()[0].angular();
-
-  // baseAngVel = real_robot.bodyVelW("pelvis").angular();
-  baseAngVel = real_robot.bodyVelW("pelvis").angular();
-  obs.segment(0, 3) = baseAngVel; //base angular vel
-  
-  Eigen::Matrix3d baseRot = real_robot.bodyPosW("pelvis").rotation();
-  // Eigen::Matrix3d baseRot = real_robot.bodyTransform("pelvis").rotation();
-  rpy = mc_rbdyn::rpyFromMat(baseRot);
-  obs(3) = rpy(0);  // roll
-  obs(4) = rpy(1);  // pitch
-
-  Eigen::VectorXd reorderedPos = policySimulatorHandling_->reorderJointsToSimulator(currentPos, dofNumber);
-  Eigen::VectorXd reorderedVel = policySimulatorHandling_->reorderJointsToSimulator(currentVel, dofNumber);
-
-  for(size_t i = 0; i < usedJoints_simuOrder.size(); ++i)
-  {
-    int idx = usedJoints_simuOrder[i];
-    if(idx >= reorderedPos.size()) {
-      mc_rtc::log::error("Leg joint index {} out of bounds for reordered size {}", idx, reorderedPos.size());
-      legPos(i) = 0.0;
-      legVel(i) = 0.0;
-    } else {
-      legPos(i) = reorderedPos(idx);
-      legVel(i) = reorderedVel(idx);
-    }
-  }
-  
-  obs.segment(5, 10) = legPos;
-  obs.segment(15, 10) = legVel;
-
-  // past action: reorder to Simulator format and extract leg joints
-  for(size_t i = 0; i < usedJoints_simuOrder.size(); ++i)
-  {
-    int idx = usedJoints_simuOrder[i];
-    if(idx >= a_simuOrder.size()) {
-      mc_rtc::log::error("Past action index {} out of bounds for size {}", idx, a_simuOrder.size());
-      legAction(i) = 0.0;
-    } else {
-      legAction(i) = a_simuOrder(idx);
-    }
-  }
-  obs.segment(25, 10) = legAction;
-  
-  // Phase components
-  auto currentTime = std::chrono::steady_clock::now();
-  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startPhase_);
-  phase_ = fmod(elapsed.count() * 0.001 * phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
-  
-  obs(35) = sin(phase_);
-  obs(36) = cos(phase_);
-
-  // Command (3 elements) - [vx, vy, yaw_rate]
-  // cmd_(1) = sin(phase_);
-  obs.segment(37, 3) = cmd_;
-
-  return obs;
-}
-
-void RLController::applyAction(const Eigen::VectorXd & action)
-{
-  if(action.size() != dofNumber)
-  {
-    mc_rtc::log::error("Action size mismatch: expected dofNumber, got {}", action.size());
-    return;
-  }
-  
-  // Check if it's time for new inference (40Hz = 25ms period)
-  auto currentTime = std::chrono::steady_clock::now();
-  auto timeSinceLastInference = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastInferenceTime_);
-  
-  bool shouldRunInference = timeSinceLastInference.count() >= INFERENCE_PERIOD_MS;
-  
-  if(shouldRunInference) {
-    // Get current observation for logging
-    Eigen::VectorXd currentObs = getCurrentObservation();
-    
-    // Update lastActions_
-    a_before_vector = a_vector;
-    // Run new inference and update target position
-    a_vector = policySimulatorHandling_->reorderJointsFromSimulator(action, dofNumber);
-
-    // Apply action blending formula: target_qpos = default_qpos + 0.75 * action + 0.25 * previous_actions
-    q_rl_vector = q_zero_vector + 0.75 * a_vector + 0.25 * a_before_vector;
-
-    // For not controlled joints, use the zero position
-    for(const auto & joint : notControlledJoints)
-    {
-      auto it = std::find(mcRtcJointsOrder.begin(), mcRtcJointsOrder.end(), joint);
-      if(it != mcRtcJointsOrder.end())
-      {
-        size_t idx = std::distance(mcRtcJointsOrder.begin(), it);
-        if(idx < q_rl_vector.size())
-        {
-          q_rl_vector(idx) = q_zero_vector(idx); // Set to zero position
-        }
-        else
-        {
-          mc_rtc::log::error("Joint {} index {} out of bounds for q_rl_vector size {}", joint, idx, q_rl_vector.size());
-        }
-      }
-      else
-      {
-        mc_rtc::log::error("Joint {} not found in mcRtcJointsOrder", joint);
-      }
-    }
-
-    a_simuOrder = policySimulatorHandling_->reorderJointsToSimulator(a_vector, dofNumber);
-
-    // Update timing
-    lastInferenceTime_ = currentTime;
-    targetPositionValid_ = true;
-    
-    static int inferenceCounter = 0;
-    inferenceCounter++;
-    
-    mc_rtc::log::info("=== RLController Policy I/O Inference #{} ===", inferenceCounter);
-    mc_rtc::log::info("Policy Input (40 obs): [");
-    for(int i = 0; i < 40; ++i) {
-      mc_rtc::log::info("  [{}]: {:.6f}", i, currentObs(i));
-    }
-    mc_rtc::log::info("]");
-    mc_rtc::log::info("Blended Target Position (dofNumber): [");
-    for(int i = 0; i < dofNumber; ++i) {
-      mc_rtc::log::info("  [{}]: {:.6f}", i, q_rl_vector(i));
-    }
-    mc_rtc::log::info("]");
-    mc_rtc::log::info("=== End Policy I/O ===");
-  }
-  
-  if(!targetPositionValid_) {
-    mc_rtc::log::warning("No valid target position available for impedance control");
-    return;
-  }
-  
-  // Get current joint positions and velocities
-  Eigen::VectorXd q_current(dofNumber);
-  Eigen::VectorXd q_dot_current(dofNumber);
-  auto & real_robot = realRobot(robots()[0].name());
-  auto q = real_robot.encoderValues();
-  q_current = Eigen::VectorXd::Map(q.data(), q.size());
-  auto vel = real_robot.encoderVelocities();
-  q_dot_current = Eigen::VectorXd::Map(vel.data(), vel.size());
-
-  const auto & robot = this->robot();
-  
-  for(size_t i = 0; i < mcRtcJointsOrder.size(); ++i)
-  {
-    if(robot.hasJoint(mcRtcJointsOrder[i]))
-    {
-      auto jIndex = robot.jointIndexByName(mcRtcJointsOrder[i]);
-      q_current(i) = robot.mbc().q[jIndex][0];
-      q_dot_current(i) = robot.mbc().alpha[jIndex][0];
-    }
-    else
-    {
-      q_current(i) = 0.0;
-      q_dot_current(i) = 0.0;
-    }
-  }
-  TasksSimulation(q_rl_vector);
-}
-
-void RLController::applyPelvisForce()
-{
-  static int debug_counter = 0;
-  debug_counter++;
-  
-  try {
-    // Create force wrench (force + torque)
-    const sva::ForceVecd wrench(Eigen::Vector3d::Zero(), pelvisForce_);
-    
-    // Debug logging every 1000 calls (1 second at 1kHz)
-    if(debug_counter % 1000 == 0) {
-      mc_rtc::log::info("[RLController] Applying pelvis force: [{:.1f}, {:.1f}, {:.1f}] N to robot '{}'", 
-                       pelvisForce_.x(), pelvisForce_.y(), pelvisForce_.z(), robot().name());
-    }
-    
-    // Check if the datastore function exists
-    std::string call_name = robot().name() + "::ApplyForcesOnBody";
-    if(!datastore().has(call_name)) {
-      if(debug_counter % 1000 == 0) {
-        mc_rtc::log::error("[RLController] Datastore call '{}' not available - not running in mc_mujoco?", call_name);
-      }
-      pelvisForceEnabled_ = false;
-      return;
-    }
-    
-    // Call mc_mujoco force application interface with correct signature
-    const std::string body_name = "pelvis";  // const reference
-    Eigen::Vector3d localPos(0, 0, 0);  // by value
-    bool success = datastore().call<bool>(call_name, body_name, wrench, std::move(localPos));
-    
-    if(!success) {
-      if(debug_counter % 1000 == 0) {
-        mc_rtc::log::warning("[RLController] Failed to apply force to pelvis body");
-      }
-    } else {
-      if(debug_counter % 1000 == 0) {
-        mc_rtc::log::info("[RLController] Successfully applied force to pelvis");
-      }
-    }
-  } catch(const std::exception & e) {
-    mc_rtc::log::warning("[RLController] Exception applying pelvis force: {}", e.what());
-    // Disable force if there's an error (likely not running in mc_mujoco)
-    pelvisForceEnabled_ = false;
-  }
-}
-
-void RLController::startInferenceThread()
-{
-  mc_rtc::log::info("Starting RL inference thread");
-  inferenceThread_ = std::make_unique<std::thread>(&RLController::inferenceThreadFunction, this);
-}
-
-void RLController::stopInferenceThread()
-{
-  if(inferenceThread_ && inferenceThread_->joinable())
-  {
-    mc_rtc::log::info("Stopping RL inference thread");
-    shouldStopInference_ = true;
-    inferenceCondition_.notify_one();
-    inferenceThread_->join();
-    inferenceThread_.reset();
-  }
-}
-
-void RLController::inferenceThreadFunction()
-{
-  mc_rtc::log::info("RL inference thread started");
-  
-  while(!shouldStopInference_)
-  {
-    //wait for new observation or stop signal
-    std::unique_lock<std::mutex> lock(observationMutex_);
-    inferenceCondition_.wait(lock, [this] { 
-      return newObservationAvailable_.load() || shouldStopInference_.load(); 
-    });
-    
-    if(shouldStopInference_) break;
-    
-    // copy observation for processing
-    Eigen::VectorXd obs = currentObservation_;
-    newObservationAvailable_ = false;
-    lock.unlock();
-    
-    try
-    {
-      if(!rlPolicy_) {
-        mc_rtc::log::error("RL policy not loaded - cannot perform inference");
-        continue;
-      }
       
-      auto startTime = std::chrono::high_resolution_clock::now();
-      Eigen::VectorXd action = rlPolicy_->predict(obs);
-      auto endTime = std::chrono::high_resolution_clock::now();
+    hardBreached = false;
+    limitBreached_q_hard_lower(i) = 0.0;
+    if(currentPos(i) < jointLimitsHardPos_lower(i) - epsilon)
+    {
+      limitBreached_q_hard_lower(i) = 1.0;
+      mc_rtc::log::info("t= {}s; Joint {} position lower hard limit breached: currentPos = {}, limit = {}", counter, jointNames[i], currentPos(i), jointLimitsHardPos_lower(i));
+      hardBreached = true;
+    }
+
+    limitBreached_q_soft_lower(i) = 0.0;
+    if(currentPos(i) < jointLimitsPos_lower(i) - epsilon)
+    {
+      limitBreached_q_soft_lower(i) = 1.0;
+      if(!hardBreached) mc_rtc::log::info("t= {}s; Joint {} position lower soft limit breached: currentPos = {}, limit = {}", counter, jointNames[i], currentPos(i), jointLimitsPos_lower(i));
+    }
+
+    //qdot lim
+    hardBreached = false;
+    limitBreached_qDot_hard_upper(i) = 0.0;
+    if(currentVel(i) > jointLimitsHardVel_upper(i) + epsilon)
+    {
+      limitBreached_qDot_hard_upper(i) = 1.0;
+      mc_rtc::log::info("t= {}s; Joint {} velocity upper hard limit breached: currentVel = {}, limit = {}", counter, jointNames[i], currentVel(i), jointLimitsHardVel_upper(i));
+      hardBreached = true;
+    }
       
-      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
+    limitBreached_qDot_soft_upper(i) = 0.0;
+    if(currentVel(i) > jointLimitsVel_upper(i) + epsilon)
+    {
+      limitBreached_qDot_soft_upper(i) = 1.0;
+      if(!hardBreached) mc_rtc::log::info("t= {}s; Joint {} velocity upper soft limit breached: currentVel = {}, limit = {}", counter, jointNames[i], currentVel(i), jointLimitsVel_upper(i));
+    }
       
-      //update shared action
-      {
-        std::lock_guard<std::mutex> actionLock(actionMutex_);
-        currentAction_ = action;
-        newActionAvailable_ = true;
-      }
-    }
-    catch(const std::exception & e)
+    hardBreached = false;
+    limitBreached_qDot_hard_lower(i) = 0.0;
+    if(currentVel(i) < jointLimitsHardVel_lower(i) - epsilon)
     {
-      mc_rtc::log::error("RL inference error: {}", e.what());
-      //keep using the previous action
+      limitBreached_qDot_hard_lower(i) = 1.0;
+      mc_rtc::log::info("t= {}s; Joint {} velocity lower hard limit breached: currentVel = {}, limit = {}", counter, jointNames[i], currentVel(i), jointLimitsHardVel_lower(i));
+      hardBreached = true;
     }
-  }
-  
-  mc_rtc::log::info("RL inference thread stopped");
-}
 
-void RLController::updateObservationForInference()
-{
-  Eigen::VectorXd obs = getCurrentObservation();
-  
-  //update shared observation
-  {
-    std::lock_guard<std::mutex> lock(observationMutex_);
-    currentObservation_ = obs;
-    newObservationAvailable_ = true;
-  }
-  
-  // notify inference thread
-  inferenceCondition_.notify_one();
-}
-
-Eigen::VectorXd RLController::getLatestAction()
-{
-  if(newActionAvailable_)
-  {
-    std::lock_guard<std::mutex> lock(actionMutex_);
-    if(newActionAvailable_)
+    limitBreached_qDot_soft_lower(i) = 0.0;
+    if(currentVel(i) < jointLimitsVel_lower(i) - epsilon)
     {
-      latestAction_ = currentAction_;
-      newActionAvailable_ = false;
+      limitBreached_qDot_soft_lower(i) = 1.0;
+      if(!hardBreached) mc_rtc::log::info("t= {}s; Joint {} velocity lower soft limit breached: currentVel = {}, limit = {}", counter, jointNames[i], currentVel(i), jointLimitsVel_lower(i));
     }
-  }
-  return latestAction_;
-} 
-
-void RLController::TasksSimulation(Eigen::VectorXd & currentTargetPosition, bool highGains)
-{
-  auto & robot = robots()[0];
-  auto & real_robot = realRobot(robots()[0].name());
-
-  auto q = real_robot.encoderValues();
-  currentPos = Eigen::VectorXd::Map(q.data(), q.size());
-  auto vel = real_robot.encoderVelocities();
-  currentVel = Eigen::VectorXd::Map(vel.data(), vel.size());
-
-  if(highGains)
-    tau_d = high_kp_vector.cwiseProduct(currentTargetPosition - currentPos) + high_kd_vector.cwiseProduct(-currentVel);
-  else
-    tau_d = kp_vector.cwiseProduct(currentTargetPosition - currentPos) + kd_vector.cwiseProduct(-currentVel);
-
-  switch (taskType)
-  {
-    case 0: // Torque Task
-    {
-      size_t i = 0;
-      for (const auto &joint_name : jointNames)
-      {
-        torque_target[joint_name][0] = tau_d[i];
-        i++;
-      }
-      break;
-    }
-    case 1: // Forward Dynamics Task
-    {
-      rbd::ForwardDynamics fd(real_robot.mb());
-      fd.computeH(real_robot.mb(), real_robot.mbc());
-      fd.computeC(real_robot.mb(), real_robot.mbc());
-      Eigen::MatrixXd M_w_floatingBase = fd.H();
-      Eigen::VectorXd Cg_w_floatingBase = fd.C();
-      Eigen::MatrixXd M = M_w_floatingBase.bottomRightCorner(dofNumber, dofNumber);
-      Eigen::VectorXd Cg = Cg_w_floatingBase.tail(dofNumber);
-      auto extTorqueSensor = robot.device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-      Eigen::VectorXd externalTorques = extTorqueSensor.torques().tail(dofNumber); // Exclude the floating base part
       
-      Eigen::VectorXd content = tau_d - Cg + externalTorques; // Add the external torques to the desired torques
-      refAccel = M.llt().solve(content);
-      break;
+    // tau lim
+    limitBreached_tau_upper(i) = 0.0;
+    if(tau_cmd(i) > jointLimitsHardTau_upper(i) + epsilon)
+    {
+      limitBreached_tau_upper(i) = 1.0;
+      mc_rtc::log::info("t= {}s; Joint {} torque upper hard limit breached: currentTau = {}, limit = {}", counter, jointNames[i], tau_cmd(i), jointLimitsHardTau_upper(i));
     }
-    default:
-      return;
+
+    limitBreached_tau_lower(i) = 0.0;
+    if(tau_cmd(i) < jointLimitsHardTau_lower(i) - epsilon)
+    {
+      limitBreached_tau_lower(i) = 1.0;
+      mc_rtc::log::info("t= {}s; Joint {} torque lower hard limit breached: currentTau = {}, limit = {}", counter, jointNames[i], tau_cmd(i), jointLimitsHardTau_lower(i));
+    }
   }
 }
 
+std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(const mc_rbdyn::Robot & anchorRobot)
+{
+  sva::PTransformd X_foot_r = anchorRobot.bodyPosW("right_ankle_link");
+  sva::PTransformd X_foot_l = anchorRobot.bodyPosW("left_ankle_link");
+
+  sva::MotionVecd v_foot_r = anchorRobot.bodyVelW("right_ankle_link");
+  sva::MotionVecd v_foot_l = anchorRobot.bodyVelW("left_ankle_link");
+
+  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+  // double tau_ext_knee_r = extTorqueSensor.torques()[robot().jointIndexByName("right_knee_joint")];
+  // double tau_ext_knee_l = extTorqueSensor.torques()[robot().jointIndexByName("left_knee_joint")];
+  double tau_ext_knee_r =  abs(extTorqueSensor.torques()[8+6]);
+  double tau_ext_knee_l =  abs(extTorqueSensor.torques()[3+6]);
+  if(tau_ext_knee_r + tau_ext_knee_l < 1e-6)
+  {
+    tau_ext_knee_l = 1;
+    tau_ext_knee_r = 1;
+  }
+  double leftFootRatio = tau_ext_knee_l/(tau_ext_knee_r+tau_ext_knee_l);
+                              
+  Eigen::VectorXd w_r = X_foot_r.translation();//* tau_ext_knee_r/(tau_ext_knee_r+tau_ext_knee_l);
+  Eigen::VectorXd w_l = X_foot_l.translation(); //* tau_ext_knee_l/(tau_ext_knee_r+tau_ext_knee_l);
+  Eigen::VectorXd contact_anchor = (w_r * (1 - leftFootRatio) + w_l * leftFootRatio)  ;
+  Eigen::VectorXd anchor_vel = (v_foot_r.linear() * (1 - leftFootRatio) + v_foot_l.linear() * leftFootRatio);
+  sva::PTransformd contact_anchor_tf(Eigen::Matrix3d::Identity(), contact_anchor); 
+
+  return {contact_anchor_tf, anchor_vel};
+}
+
+void RLController::addRLConstraints()
+{
+  Eigen::VectorXd torqueLimManiskillOrder(19);
+  torqueLimManiskillOrder << 150.0, 150.0, 150.0, 150.0, 150.0, 
+                              30.0, 30.0, 150.0, 150.0, 30.0, 
+                              30.0, 150.0, 150.0, 30.0, 30.0, 
+                              30.0, 30.0, 30.0, 30.0;
+
+  Eigen::VectorXd qLimManiskillOrder_lower(19);
+  qLimManiskillOrder_lower << -0.48, -0.48, -0.35, -0.35, -0.35, 
+                              -1.05, -1.05, -2.58, -2.58, -0.39, 
+                              -0.39, 0.05,  0.05,  -1.35, -1.35, 
+                              -0.92, -0.92, -1.30, -1.30;
+
+  Eigen::VectorXd qLimManiskillOrder_upper(19);
+  qLimManiskillOrder_upper << 0.48,  0.48,  0.35,  0.35,  0.35,  
+                              1.05,  1.05,  2.58,  2.58,  0.39,  
+                              0.39, 2.10, 2.10,  1.35,  1.35,  
+                              0.57, 0.57,  1.30,  1.30;
+
+  Eigen::VectorXd maniskillToMcRtcIdx_(19);
+  maniskillToMcRtcIdx_ << 0, 3, 7, 11, 15, 1, 4, 8, 12, 16, 2, 5, 9, 13, 17, 6, 10, 14, 18;
+
+  // Convert to simulator order
+  Eigen::VectorXd torqueLim_simuOrder = Eigen::VectorXd::Zero(19);
+  Eigen::VectorXd qLim_simuOrder_lower = Eigen::VectorXd::Zero(19);
+  Eigen::VectorXd qLim_simuOrder_upper = Eigen::VectorXd::Zero(19);
+        
+  for(size_t i = 0; i < maniskillToMcRtcIdx_.size(); ++i)
+  {
+    int simuIdx = maniskillToMcRtcIdx_[i];
+    if(simuIdx != -1)
+    {
+      torqueLim_simuOrder(i) = torqueLimManiskillOrder(simuIdx);
+      qLim_simuOrder_lower(i) = qLimManiskillOrder_lower(simuIdx);
+      qLim_simuOrder_upper(i) = qLimManiskillOrder_upper(simuIdx);
+    }
+  }
+
+  for (size_t i = 0 ; i < robot().refJointOrder().size() ; i++)
+  {
+    const std::string & jname = robot().refJointOrder()[i];
+    auto mcJointId = robot().jointIndexByName(jname);
+    if (robot().mbc().q[mcJointId].empty())
+      continue;
+    
+    robot().ql().at(mcJointId)[0] = qLim_simuOrder_lower(i);
+    robot().qu().at(mcJointId)[0] = qLim_simuOrder_upper(i);
+    robot().tl().at(mcJointId)[0] = -torqueLim_simuOrder(i);
+    robot().tu().at(mcJointId)[0] = torqueLim_simuOrder(i);
+  }
+}
