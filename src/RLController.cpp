@@ -10,6 +10,7 @@
 #include <cmath>
 #include <numeric>
 #include <utility>
+#include <vector>
 
 
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config)
@@ -309,6 +310,28 @@ void RLController::addGui()
   // Add a button to change the velocity command
   gui()->addElement({"FSM", "Options"},
   mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL_));
+
+  // Add a dropdown to select policy
+  gui()->addElement(
+    {"RL Controller", "Policy"},
+    mc_rtc::gui::ComboInput(
+      "Policy Path",
+      policyPaths,
+      [this]() -> const std::string & { 
+        return policyPaths[currentPolicyIndex_]; 
+      },
+      [this](const std::string & selected) { 
+        // Find the index of the selected policy
+        auto it = std::find(policyPaths.begin(), policyPaths.end(), selected);
+        if(it != policyPaths.end()) {
+          currentPolicyIndex_ = std::distance(policyPaths.begin(), it);
+          mc_rtc::log::info("Selected policy [{}]: {}", currentPolicyIndex_, selected);
+          // Loading the new policy
+          rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPaths[currentPolicyIndex_]);
+        }
+      }
+    )
+  );
 }
 
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
@@ -497,13 +520,13 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   phase_ = 0.0;  // Phase for periodic gait
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
   
-  std::string policyPath = config("policy_path", std::string(""));
-  if(policyPath.empty())
-    policyPath = "example_walking_h1.onnx"; // Default policy path if not specified in config
-
-  mc_rtc::log::info("Loading RL policy from: {}", policyPath);
+  // Load policy paths from config
+  policyPaths = config("policy_path", std::vector<std::string>{"example_walking_h1.onnx"});
+  currentPolicyIndex_ = 0;  // Start with first policy
+  
+  mc_rtc::log::info("Loading RL policy [{}]: {}", currentPolicyIndex_, policyPaths[currentPolicyIndex_]);
   try {
-    rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPath);
+    rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPaths[currentPolicyIndex_]);
     if(rlPolicy_) {
       mc_rtc::log::success("RL policy loaded successfully");
       // Initialize observation vector with the correct size from the loaded policy

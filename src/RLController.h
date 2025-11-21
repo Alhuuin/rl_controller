@@ -97,6 +97,8 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   std::vector<int> usedJoints_simuOrder; // Indices of the leg joints in the Simulator order
 
   // RL policy 
+  std::vector<std::string> policyPaths;
+  int currentPolicyIndex_ = 0;
   std::unique_ptr<RLPolicyInterface> rlPolicy_;
   std::unique_ptr<PolicySimulatorHandling> policySimulatorHandling_;
   utils utils_; // Utility functions for RL controller

@@ -59,7 +59,7 @@ init: RL_State
 
 
 # RL Controller specific configuration
-policy_path: "example_walking_h1.onnx"
+policy_path: ["example_walking_h1.onnx", "walking_policy.onnx"]  # Path to the RL policy file(s)
 is_torque_control: true
 use_QP: true
 
