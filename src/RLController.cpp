@@ -625,17 +625,6 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   phase_ = 0.0;  // Phase for periodic gait
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
   
-  // Initialize external force application (hardcoded for testing)
-  externalForceEnabled_ = false;
-  pelvisForceEnabled_ = false;
-  pelvisForce_ = Eigen::Vector3d(0.0, 0.10, -100.0);  // Default 100N downward force for testing
-  mc_rtc::log::info("[RLController] External force application initialized with test force: [{:.1f}, {:.1f}, {:.1f}] N", 
-                   pelvisForce_.x(), pelvisForce_.y(), pelvisForce_.z());
-  mc_rtc::log::info("[RLController] Robot name: '{}', Available bodies:", robot().name());
-  for(const auto & body : robot().mb().bodies()) {
-    mc_rtc::log::info("[RLController]   Body: '{}'", body.name());
-  }
-  
   std::string policyPath = config("policy_path", std::string(""));
   if(policyPath.empty())
     policyPath = "policy.onnx"; // Default policy path if not specified in config
