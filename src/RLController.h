@@ -98,7 +98,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 
   // RL policy 
   std::vector<std::string> policyPaths;
-  int currentPolicyIndex_ = 0;
+  int currentPolicyIndex = 0;
   std::unique_ptr<RLPolicyInterface> rlPolicy_;
   std::unique_ptr<PolicySimulatorHandling> policySimulatorHandling_;
   utils utils_; // Utility functions for RL controller

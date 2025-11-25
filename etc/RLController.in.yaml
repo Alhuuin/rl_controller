@@ -59,7 +59,9 @@ init: RL_State
 
 
 # RL Controller specific configuration
-policy_path: ["example_walking_h1.onnx", "walking_policy.onnx"]  # Path to the RL policy file(s)
+# policy_path: ["example_walking_h1.onnx", "walking_policy.onnx"]  # Path to the RL policy file(s)
+# policy_path: ["walking_policy.onnx", "example_walking_h1.onnx"]  # Path to the RL policy file(s)
+policy_path: ["standing_policy.onnx", "walking_policy.onnx"]  # Path to the RL policy file(s)
 is_torque_control: true
 use_QP: true
 
@@ -96,16 +98,16 @@ mc_rtc_joints_order: [
 ]
 
 kp:
-    left_hip_yaw_joint: 200.0
-    left_hip_roll_joint: 200.0
-    left_hip_pitch_joint: 200.0
-    left_knee_joint: 300.0
-    left_ankle_joint: 40.0
-    right_hip_yaw_joint: 200.0
-    right_hip_roll_joint: 200.0
-    right_hip_pitch_joint: 200.0
-    right_knee_joint: 300.0
-    right_ankle_joint: 40.0
+    left_hip_yaw_joint: 100.0
+    left_hip_roll_joint: 100.0
+    left_hip_pitch_joint: 100.0
+    left_knee_joint: 100.0
+    left_ankle_joint: 20.0
+    right_hip_yaw_joint: 100.0
+    right_hip_roll_joint: 100.0
+    right_hip_pitch_joint: 100.0
+    right_knee_joint: 100.0
+    right_ankle_joint: 20.0
     torso_joint: 100.0
     left_shoulder_pitch_joint: 100.0
     left_shoulder_roll_joint: 100.0
@@ -117,16 +119,16 @@ kp:
     right_elbow_joint: 100.0
 
 kd:
-    left_hip_yaw_joint: 5.0
-    left_hip_roll_joint: 5.0
-    left_hip_pitch_joint: 5.0
-    left_knee_joint: 6.0
-    left_ankle_joint: 2.0
-    right_hip_yaw_joint: 5.0
-    right_hip_roll_joint: 5.0
-    right_hip_pitch_joint: 5.0
-    right_knee_joint: 6.0
-    right_ankle_joint: 2.0
+    left_hip_yaw_joint: 10.0
+    left_hip_roll_joint: 10.0
+    left_hip_pitch_joint: 10.0
+    left_knee_joint: 10.0
+    left_ankle_joint: 4.0
+    right_hip_yaw_joint: 10.0
+    right_hip_roll_joint: 10.0
+    right_hip_pitch_joint: 10.0
+    right_knee_joint: 10.0
+    right_ankle_joint: 4.0
     torso_joint: 10.0
     left_shoulder_pitch_joint: 5.0
     left_shoulder_roll_joint: 5.0
