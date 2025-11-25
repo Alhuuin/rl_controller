@@ -47,6 +47,7 @@ Default policies are located in the [`policy/`](policy/) directory. The controll
    - QP usage
    - Simulator used during training
    - Controlled joints indices
+   - PD gains ratio
    - PD gains (kp and kd)
 
 - **Define observation vectors** in [`src/utils.cpp`](src/utils.cpp#L131) (l.131). The file includes default examples for:

@@ -54,7 +54,7 @@ bool RLController::run()
   // auto tauIn = real_robot.mbc().jointTorque;
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
-  Eigen::MatrixXd Kp_inv = current_kp.cwiseInverse().asDiagonal();
+  Eigen::MatrixXd Kp_inv = (pd_gains_ratio * kp_vector).cwiseInverse().asDiagonal();
   auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
   auto tau_ext = extTorqueSensor.torques();
 
@@ -65,7 +65,7 @@ bool RLController::run()
   if(!useQP) // Run RL without taking account of the QP
   {
     q_cmd = q_rl; // Use the RL position as the commanded position
-    tau_cmd = kp_vector.cwiseProduct(q_rl - currentPos) - kd_vector.cwiseProduct(currentVel);
+    tau_cmd = (pd_gains_ratio * kp_vector).cwiseProduct(q_rl - currentPos) - (pd_gains_ratio * kd_vector).cwiseProduct(currentVel);
     computeRLStateSimulated();
     updateRobotCmdAfterQP();
     return true;
@@ -151,8 +151,9 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
     usedJoints_simuOrder = std::vector<int>(dofNumber);
     std::iota(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end(), 0);
   }
-  
+
   // Update PD gains
+  pd_gains_ratio = config("policies")[currentPolicyIndex]("pd_gains_ratio", 1.0);
   std::map<std::string, double> kp = config("policies")[currentPolicyIndex]("kp");
   std::map<std::string, double> kd = config("policies")[currentPolicyIndex]("kd");
   
@@ -160,17 +161,15 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
     const auto & jName = robot().mb().joint(i + 1).name();  // +1 to skip Root
     if(kp.count(jName)) {
       kp_vector(i) = kp[jName];
-      current_kp(i) = kp[jName];
     }
     if(kd.count(jName)) {
       kd_vector(i) = kd[jName];
-      current_kd(i) = kd[jName];
     }
   }
   
-  mc_rtc::log::info("[RLController] PD gains updated for policy [{}]", currentPolicyIndex);
-  mc_rtc::log::info("[RLController] current_kp: {}", current_kp.transpose());
-  mc_rtc::log::info("[RLController] current_kd: {}", current_kd.transpose());
+  mc_rtc::log::info("[RLController] PD gains updated for policy [{}] with ratio {}", currentPolicyIndex, pd_gains_ratio);
+  mc_rtc::log::info("[RLController] base kp: {}", kp_vector.transpose());
+  mc_rtc::log::info("[RLController] base kd: {}", kd_vector.transpose());
   
   // Load the policy file
   std::string policyDir = std::string(PROJECT_SOURCE_DIR) + "/policy/";
@@ -205,7 +204,7 @@ void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
   auto tau = real_robot.jointTorques();
   currentTau = Eigen::VectorXd::Map(tau.data(), tau.size());
 
-  tau_d = kp_vector.cwiseProduct(currentTargetPosition - currentPos) - kd_vector.cwiseProduct(currentVel);
+  tau_d = (pd_gains_ratio * kp_vector).cwiseProduct(currentTargetPosition - currentPos) - (pd_gains_ratio * kd_vector).cwiseProduct(currentVel);
    
   size_t i = 0;
   for (const auto &joint_name : jointNames)
@@ -274,9 +273,9 @@ void RLController::computeInversePD()
   qdot_rl_simulatedMeasure = currentVel + qddot_rl_simulatedMeasure*timeStep;
   q_rl_simulatedMeasure += qdot_rl_simulatedMeasure*timeStep;
 
-  Eigen::MatrixXd Kp_inv = current_kp.cwiseInverse().asDiagonal();
+  Eigen::MatrixXd Kp_inv = (pd_gains_ratio * kp_vector).cwiseInverse().asDiagonal();
 
-  q_cmd = currentPos + Kp_inv*(tau_cmd + current_kd.cwiseProduct(currentVel)); // Inverse PD control to get the commanded position <=> RL position control
+  q_cmd = currentPos + Kp_inv*(tau_cmd + (pd_gains_ratio * kd_vector).cwiseProduct(currentVel)); // Inverse PD control to get the commanded position <=> RL position control
 }
 
 void RLController::computeRLStateSimulated()
@@ -289,7 +288,7 @@ void RLController::computeRLStateSimulated()
   Eigen::VectorXd Cg_w_floatingBase = fd.C();
 
   auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-  tau_rl = kp_vector.cwiseProduct(q_rl - currentPos) - kd_vector.cwiseProduct(currentVel);
+  tau_rl = (pd_gains_ratio * kp_vector).cwiseProduct(q_rl - currentPos) - (pd_gains_ratio * kd_vector).cwiseProduct(currentVel);
   Eigen::VectorXd tau_rl_w_floating_base = Eigen::VectorXd::Zero(robot().mb().nrDof());
   tau_rl_w_floating_base.tail(dofNumber) = tau_rl;
   Eigen::VectorXd content = tau_rl_w_floating_base + extTorqueSensor.torques() - Cg_w_floatingBase; // Add the external torques to the desired torques
@@ -310,8 +309,11 @@ void RLController::addLog()
   // Robot State variables
   logger().addLogEntry("RLController_refAccel", [this]() { return refAccel; });
   logger().addLogEntry("RLController_tau_d", [this]() { return tau_d; });
-  logger().addLogEntry("RLController_kp", [this]() { return current_kp; });
-  logger().addLogEntry("RLController_kd", [this]() { return current_kd; });
+  logger().addLogEntry("RLController_kp_base", [this]() { return kp_vector; });
+  logger().addLogEntry("RLController_kd_base", [this]() { return kd_vector; });
+  logger().addLogEntry("RLController_kp_actual", [this]() { return current_kp; });
+  logger().addLogEntry("RLController_kd_actual", [this]() { return current_kd; });
+  logger().addLogEntry("RLController_pd_gains_ratio", [this]() { return pd_gains_ratio; });
   logger().addLogEntry("RLController_currentPos", [this]() { return currentPos; });
   logger().addLogEntry("RLController_currentVel", [this]() { return currentVel; });
   logger().addLogEntry("RLController_q_cmd", [this]() { return q_cmd; });
@@ -439,6 +441,31 @@ void RLController::addGui(const mc_rtc::Configuration & config)
       }
     )
   );
+
+  // Add PD gains ratio slider
+  gui()->addElement({"RLController", "PD Gains"},
+    mc_rtc::gui::NumberSlider("PD Gains Ratio", [this]() { return pd_gains_ratio; },
+      [this](double v) { 
+        pd_gains_ratio = v;
+        // Update the actual gains on the robot when ratio changes
+        setPDGains(kp_vector, kd_vector);
+      }, 0.0, 2.0)
+  );
+  
+  // Display actual gains (base * ratio) for each joint - read-only
+  const auto & jointOrder = robot().refJointOrder();
+  for(size_t i = 0; i < jointOrder.size() && i < static_cast<size_t>(kp_vector.size()); ++i) {
+    gui()->addElement({"RLController", "PD Gains", "Actual Kp"},
+      mc_rtc::gui::Label(jointOrder[i], [this, i]() { 
+        return std::to_string(pd_gains_ratio * kp_vector(i)); 
+      })
+    );
+    gui()->addElement({"RLController", "PD Gains", "Actual Kd"},
+      mc_rtc::gui::Label(jointOrder[i], [this, i]() { 
+        return std::to_string(pd_gains_ratio * kd_vector(i)); 
+      })
+    );
+  }
 }
 
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
@@ -521,6 +548,7 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   qddot_err = Eigen::VectorXd::Zero(dofNumber);
   
   // Get the gains from the configuration or set default values
+  pd_gains_ratio = config("policies")[currentPolicyIndex]("pd_gains_ratio", 1.0);
   std::map<std::string, double> kp = config("policies")[currentPolicyIndex]("kp");
   std::map<std::string, double> kd = config("policies")[currentPolicyIndex]("kd");
   // Get the default posture target from the robot's posture task
@@ -699,28 +727,33 @@ std::tuple<Eigen::VectorXd, Eigen::VectorXd> RLController::getPDGains()
 bool RLController::setPDGains(Eigen::VectorXd p_vec, Eigen::VectorXd d_vec)
 {
   std::string robot_name = robot().name();
-  // Update kp and kd use by the controller
-  current_kp = p_vec;
-  current_kd = d_vec;
+  // Apply ratio to get actual gains
+  Eigen::VectorXd actual_kp = pd_gains_ratio * p_vec;
+  Eigen::VectorXd actual_kd = pd_gains_ratio * d_vec;
+
+  // Cache the gains we're setting
+  current_kp = actual_kp;
+  current_kd = actual_kd;
 
   // Update kp and kd use by the robot or simulator (Internal PD)
-  mc_rtc::log::info("[RLController] Setting PD gains for {}:\n\tkp = {}\n\tkd = {}", robot_name, p_vec.transpose(), d_vec.transpose());
-  const std::vector<double> proportionalGains_vec(p_vec.data(), p_vec.data() + p_vec.size());
-  const std::vector<double> dampingGains_vec(d_vec.data(), d_vec.data() + d_vec.size());
+  const std::vector<double> proportionalGains_vec(actual_kp.data(), actual_kp.data() + actual_kp.size());
+  const std::vector<double> dampingGains_vec(actual_kd.data(), actual_kd.data() + actual_kd.size());
   return datastore().call<bool>(robot_name + "::SetPDGains", proportionalGains_vec, dampingGains_vec);
 }
 
 bool RLController::isHighGain(double tol)
 {
-  // Update kp and kd use by the controller
+  // Get current gains from robot and update cache
   std::tie(current_kp, current_kd) = getPDGains();
-  // Check if the current gains are close to the low gains
-  bool lowGain = ((current_kp - kp_vector).norm() < tol) && ((current_kd - kd_vector).norm() < tol);
+  // Check if the current gains are close to the target gains (with ratio)
+  Eigen::VectorXd target_kp = pd_gains_ratio * kp_vector;
+  Eigen::VectorXd target_kd = pd_gains_ratio * kd_vector;
+  bool lowGain = ((current_kp - target_kp).norm() < tol) && ((current_kd - target_kd).norm() < tol);
   bool highGain = !lowGain;
   mc_rtc::log::info("[RLController] current_kp: {}", current_kp.transpose());
   mc_rtc::log::info("[RLController] current_kd: {}", current_kd.transpose());
-  mc_rtc::log::info("[RLController] kp_vector: {}", kp_vector.transpose());
-  mc_rtc::log::info("[RLController] kd_vector: {}", kd_vector.transpose());
+  mc_rtc::log::info("[RLController] target_kp (ratio {}): {}", pd_gains_ratio, target_kp.transpose());
+  mc_rtc::log::info("[RLController] target_kd (ratio {}): {}", pd_gains_ratio, target_kd.transpose());
   mc_rtc::log::info("[RLController] isHighGain: {}", highGain);
   return highGain;
 }

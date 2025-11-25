@@ -54,6 +54,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   std::map<std::string, std::vector<double>> torque_target; // Target torques for the torque task;
   bool useQP = true;
   bool isTorqueControl = false;
+  double pd_gains_ratio = 1.0;
 
   // Robot specific data
   std::string robotName;
@@ -62,10 +63,11 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   size_t dofNumber = 0;
 
   // Gains
-  Eigen::VectorXd kp_vector;
-  Eigen::VectorXd kd_vector;
-  Eigen::VectorXd current_kp;
-  Eigen::VectorXd current_kd;
+  Eigen::VectorXd kp_vector;  // Base PD gains from config
+  Eigen::VectorXd kd_vector;  // Base PD gains from config
+  Eigen::VectorXd current_kp; // Actual gains currently set on the robot/simulator
+  Eigen::VectorXd current_kd; // Actual gains currently set on the robot/simulator
+  // Actual gains sent to robot = pd_gains_ratio * kp_vector (or kd_vector)
 
   // Options
   bool compensateExternalForces = false;
