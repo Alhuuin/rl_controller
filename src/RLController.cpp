@@ -410,6 +410,11 @@ void RLController::addLog()
   logger().addLogEntry("RLController_floatingBase_tauOutPD", [this]() { return floatingBase_tauOutPD; });
   logger().addLogEntry("RLController_floatingBase_qIn", [this]() { return floatingBase_qIn; });
   logger().addLogEntry("RLController_floatingBase_alphaIn", [this]() { return floatingBase_alphaIn; });
+  
+  // Log current policy (combined index and path)
+  logger().addLogEntry("RLController_currentPolicy", [this]() { 
+    return std::to_string(currentPolicyIndex) + ": " + policyPaths[currentPolicyIndex]; 
+  });
 }
 
 void RLController::addGui(const mc_rtc::Configuration & config)
@@ -423,8 +428,11 @@ void RLController::addGui(const mc_rtc::Configuration & config)
   // Add a dropdown to select policy
   gui()->addElement(
     {"RLController", "Policy"},
+    mc_rtc::gui::Label("Current policy", [this]() -> const std::string & { 
+      return policyPaths[currentPolicyIndex]; 
+    }),
     mc_rtc::gui::ComboInput(
-      "Policy Path",
+      "Select policy",
       policyPaths,
       [this]() -> const std::string & { 
         return policyPaths[currentPolicyIndex]; 
