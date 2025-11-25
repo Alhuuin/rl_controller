@@ -16,10 +16,8 @@
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config)
 : mc_control::fsm::Controller(rm, dt, config, Backend::TVM)
 {
-  logTiming_ = config("log_timing");
-  timingLogInterval_ = config("timing_log_interval");
-  useQP = config("use_QP", true);
-  isTorqueControl = config("is_torque_control", false);
+  currentPolicyIndex = 0;  // Start with first policy
+  loadConfig(config);
 
   //Initialize Constraints
   selfCollisionConstraint->setCollisionsDampers(solver(), {1.2, 200.0});
@@ -30,9 +28,6 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
 
   // Initialize Task
   torqueTask = std::make_shared<mc_tasks::TorqueTask>(solver(), robot().robotIndex());
-
-  initializeRobot(config);
-  initializeRLPolicy(config);
   
   if(useAsyncInference_)
   {
@@ -40,7 +35,7 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
     utils_.startInferenceThread(ctl);
   }
 
-  addGui();
+  addGui(config);
   addLog();
   mc_rtc::log::success("RLController init");
 }
@@ -86,6 +81,116 @@ void RLController::reset(const mc_control::ControllerResetData & reset_data)
 {
   mc_control::fsm::Controller::reset(reset_data);
   mc_rtc::log::success("RLController reset completed");
+}
+
+void RLController::loadConfig(const mc_rtc::Configuration & config)
+{ 
+  // Load policy paths from config
+  policyPaths = config("policy_path", std::vector<std::string>{"walking_better_h1.onnx"});
+
+  logTiming_ = config("log_timing");
+  timingLogInterval_ = config("timing_log_interval");
+  useQP = config("policies")[currentPolicyIndex]("use_QP", true);
+  isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
+ 
+  initializeRobot(config);
+  initializeRLPolicy(config);
+}
+
+void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & config)
+{
+  if(policyIndex < 0 || policyIndex >= static_cast<int>(policyPaths.size())) {
+    mc_rtc::log::error("Invalid policy index: {}", policyIndex);
+    return;
+  }
+  
+  mc_rtc::log::info("Switching from policy [{}] to policy [{}]", currentPolicyIndex, policyIndex);
+  currentPolicyIndex = policyIndex;
+  
+  // Update policy-specific boolean flags
+  useQP = config("policies")[currentPolicyIndex]("use_QP", true);
+  isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
+  
+  // Update robot name (in case it changes between policies)
+  robotName = config("policies")[currentPolicyIndex]("robot_name", std::string("H1"));
+  
+  // Update simulator handling
+  std::string simulator = config("policies")[currentPolicyIndex]("simulator", std::string(""));
+  if (simulator.empty()) {
+    mc_rtc::log::warning("Simulator not set, using default handling");
+    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>();
+  } else {
+    mc_rtc::log::info("Using {} handling", simulator);
+    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>(simulator, robotName);
+  }
+  
+  // Update used joints
+  usedJoints_mcRtcOrder = config("policies")[currentPolicyIndex]("used_joints_index", std::vector<int>{});
+  if(!usedJoints_mcRtcOrder.empty()) {
+    usedJoints_simuOrder = policySimulatorHandling_->getSimulatorIndices(usedJoints_mcRtcOrder);
+    std::sort(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end());
+    
+    std::string jointsStrMc = "[";
+    for(size_t i = 0; i < usedJoints_mcRtcOrder.size(); ++i) {
+      if(i > 0) jointsStrMc += ", ";
+      jointsStrMc += std::to_string(usedJoints_mcRtcOrder[i]);
+    }
+    jointsStrMc += "]";
+    
+    std::string jointsStrSimu = "[";
+    for(size_t i = 0; i < usedJoints_simuOrder.size(); ++i) {
+      if(i > 0) jointsStrSimu += ", ";
+      jointsStrSimu += std::to_string(usedJoints_simuOrder[i]);
+    }
+    jointsStrSimu += "]";
+    
+    mc_rtc::log::info("Using custom used joints (mc_rtc order): {}", jointsStrMc);
+    mc_rtc::log::info("Using custom used joints (simu order): {}", jointsStrSimu);
+  } else {
+    mc_rtc::log::info("Using all joints");
+    usedJoints_simuOrder = std::vector<int>(dofNumber);
+    std::iota(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end(), 0);
+  }
+  
+  // Update PD gains
+  std::map<std::string, double> kp = config("policies")[currentPolicyIndex]("kp");
+  std::map<std::string, double> kd = config("policies")[currentPolicyIndex]("kd");
+  
+  for(size_t i = 0; i < dofNumber; ++i) {
+    const auto & jName = robot().mb().joint(i + 1).name();  // +1 to skip Root
+    if(kp.count(jName)) {
+      kp_vector(i) = kp[jName];
+      current_kp(i) = kp[jName];
+    }
+    if(kd.count(jName)) {
+      kd_vector(i) = kd[jName];
+      current_kd(i) = kd[jName];
+    }
+  }
+  
+  mc_rtc::log::info("[RLController] PD gains updated for policy [{}]", currentPolicyIndex);
+  mc_rtc::log::info("[RLController] current_kp: {}", current_kp.transpose());
+  mc_rtc::log::info("[RLController] current_kd: {}", current_kd.transpose());
+  
+  // Load the policy file
+  std::string policyDir = std::string(PROJECT_SOURCE_DIR) + "/policy/";
+  std::string fullPath = policyPaths[currentPolicyIndex];
+  if(fullPath[0] != '/') {
+    fullPath = policyDir + fullPath;
+  }
+  
+  try {
+    rlPolicy_ = std::make_unique<RLPolicyInterface>(fullPath);
+    if(rlPolicy_) {
+      currentObservation_ = Eigen::VectorXd::Zero(rlPolicy_->getObservationSize());
+      mc_rtc::log::success("Policy switched successfully to [{}]: {}", currentPolicyIndex, policyPaths[currentPolicyIndex]);
+      mc_rtc::log::info("Observation size: {}", rlPolicy_->getObservationSize());
+      mc_rtc::log::info("Action size: {}", rlPolicy_->getActionSize());
+    }
+  } catch(const std::exception& e) {
+    mc_rtc::log::error("Failed to load policy: {}", e.what());
+    return;
+  }
 }
 
 void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
@@ -163,7 +268,9 @@ void RLController::computeInversePD()
   Eigen::VectorXd tau_cmd_w_floatingBase = M_w_floatingBase*ddot_qp_w_floatingBase + Cg_w_floatingBase - extTorqueSensor.torques();
   tau_cmd = tau_cmd_w_floatingBase.tail(dofNumber);
 
-  qddot_rl_simulatedMeasure = M_w_floatingBase.llt().solve(tau_rl + extTorqueSensor.torques() - Cg_w_floatingBase).tail(dofNumber);
+  Eigen::VectorXd tau_rl_w_floating_base = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  tau_rl_w_floating_base.tail(dofNumber) = tau_rl;
+  qddot_rl_simulatedMeasure = M_w_floatingBase.llt().solve(tau_rl_w_floating_base + extTorqueSensor.torques() - Cg_w_floatingBase).tail(dofNumber);
   qdot_rl_simulatedMeasure = currentVel + qddot_rl_simulatedMeasure*timeStep;
   q_rl_simulatedMeasure += qdot_rl_simulatedMeasure*timeStep;
 
@@ -303,7 +410,7 @@ void RLController::addLog()
   logger().addLogEntry("RLController_floatingBase_alphaIn", [this]() { return floatingBase_alphaIn; });
 }
 
-void RLController::addGui()
+void RLController::addGui(const mc_rtc::Configuration & config)
 {
   gui()->addElement({"RLController", "Options"},
   mc_rtc::gui::Checkbox("Compensate External Forces", compensateExternalForces));
@@ -320,14 +427,14 @@ void RLController::addGui()
       [this]() -> const std::string & { 
         return policyPaths[currentPolicyIndex]; 
       },
-      [this](const std::string & selected) { 
+      [this, config](const std::string & selected) {  // Capture config by VALUE (makes a safe copy)
         // Find the index of the selected policy
         auto it = std::find(policyPaths.begin(), policyPaths.end(), selected);
         if(it != policyPaths.end()) {
-          currentPolicyIndex = std::distance(policyPaths.begin(), it);
-          mc_rtc::log::info("Selected policy [{}]: {}", currentPolicyIndex, selected);
-          // Loading the new policy
-          rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPaths[currentPolicyIndex]);
+          int newIndex = std::distance(policyPaths.begin(), it);
+          mc_rtc::log::info("User requested policy switch to [{}]: {}", newIndex, selected);
+          // Switch to new policy without reinitializing robot
+          switchPolicy(newIndex, config);
         }
       }
     )
@@ -337,7 +444,10 @@ void RLController::addGui()
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
 {
   // H1 joints in mc_rtc/URDF order (based on unitree_sdk2 reorder_obs function)
-  auto mcRtcJointsOrder = config("mc_rtc_joints_order");
+  //get the configured joints order depending on the robot used
+  robotName = config("policies")[currentPolicyIndex]("robot_name", std::string("H1"));
+
+  auto mcRtcJointsOrder = config("Robot")(robotName)("mc_rtc_joints_order");
 
   dofNumber = robot().mb().nrDof() - 6; // Remove the floating base part (6 DoF)
 
@@ -413,8 +523,8 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   qddot_err = Eigen::VectorXd::Zero(dofNumber);
   
   // Get the gains from the configuration or set default values
-  std::map<std::string, double> kp = config("kp");
-  std::map<std::string, double> kd = config("kd");
+  std::map<std::string, double> kp = config("policies")[currentPolicyIndex]("kp");
+  std::map<std::string, double> kd = config("policies")[currentPolicyIndex]("kd");
   // Get the default posture target from the robot's posture task
   std::shared_ptr<mc_tasks::PostureTask> FSMPostureTask = getPostureTask(robot().name());
   auto posture = FSMPostureTask->posture();
@@ -520,10 +630,6 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   phase_ = 0.0;  // Phase for periodic gait
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
   
-  // Load policy paths from config
-  policyPaths = config("policy_path", std::vector<std::string>{"example_walking_h1.onnx"});
-  currentPolicyIndex = 0;  // Start with first policy
-  
   mc_rtc::log::info("Loading RL policy [{}]: {}", currentPolicyIndex, policyPaths[currentPolicyIndex]);
   try {
     rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPaths[currentPolicyIndex]);
@@ -539,7 +645,7 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
     mc_rtc::log::error_and_throw("Failed to load RL policy: {}", e.what());
   }
 
-  std::string simulator = config("Simulator", std::string(""));
+  std::string simulator = config("policies")[currentPolicyIndex]("simulator", std::string(""));
   if (simulator.empty())
   {
     mc_rtc::log::warning("Simulator not set, using default handling");
@@ -548,11 +654,11 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   else
   {
     mc_rtc::log::info("Using {} handling", simulator);
-    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>(simulator);
+    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>(simulator, robotName);
   }
 
   // get list of used joints from config
-  usedJoints_mcRtcOrder = config("Used_joints_index", std::vector<int>{});
+  usedJoints_mcRtcOrder = config("policies")[currentPolicyIndex]("used_joints_index", std::vector<int>{});
   if(!usedJoints_mcRtcOrder.empty())
   {
     std::string jointsStr = "[";

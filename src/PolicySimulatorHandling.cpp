@@ -8,21 +8,21 @@ PolicySimulatorHandling::PolicySimulatorHandling()
   // Default constructor - no simulator handling
 }
 
-PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_name):
-    simulatorName(simulator_name)
+PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_name, const std::string& robot_name):
+    simulatorName(simulator_name), robotName(robot_name)
 {
   // check if simuToMcRtcIdx_ needs initialization
   if (!simuToMcRtcIdx_.empty())
   {
-    mc_rtc::log::warning("Simulator mapping for {} manually initialized in header", simulator_name);
+    mc_rtc::log::warning("Simulator mapping for {} on {} manually initialized in header", simulator_name, robot_name);
   }
-  if(simulator_name == "Maniskill" || simulator_name == "IsaacLab")
+  if(robot_name == "H1" && (simulator_name == "Maniskill" || simulator_name == "IsaacLab"))
   {
       mcRtcToSimuIdx_ = {0, 5, 10, 1, 6, 11, 15, 2, 7, 12, 16, 3, 8, 13, 17, 4, 9, 14, 18};
       simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
   }
   else {
-      mc_rtc::log::error_and_throw("Unsupported simulator: {}, please specify a mc_rtc to simulator joint order mapping in PolicySimulatorHandling.h", simulator_name);
+      mc_rtc::log::error_and_throw("Unsupported simulator or robot: {} with {}, please specify a mc_rtc to simulator joint order mapping in PolicySimulatorHandling.h", simulator_name, robot_name);
   }
 }
 

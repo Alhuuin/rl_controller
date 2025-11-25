@@ -9,7 +9,7 @@ class PolicySimulatorHandling
 {
 public:
     PolicySimulatorHandling();
-    PolicySimulatorHandling(const std::string& simulator_name);
+    PolicySimulatorHandling(const std::string& simulator_name, const std::string& robot_name);
     ~PolicySimulatorHandling();
   
     Eigen::VectorXd reorderJointsToSimulator(const Eigen::VectorXd & obs, std::size_t dofNumber);
@@ -18,6 +18,7 @@ public:
     std::vector<int> getSimulatorIndices(std::vector<int> mcRtcIndices) const;
 
     std::string simulatorName;
+    std::string robotName;
     
 private:
     std::vector<int> simuToMcRtcIdx_;    // Joint Mapping simu -> mc_rtc

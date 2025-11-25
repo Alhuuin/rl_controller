@@ -29,8 +29,10 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 
   void reset(const mc_control::ControllerResetData & reset_data) override;
 
+  void loadConfig(const mc_rtc::Configuration & config);
+  void switchPolicy(int policyIndex, const mc_rtc::Configuration & config);  // Switch to a different policy at runtime
   void addLog();
-  void addGui();
+  void addGui(const mc_rtc::Configuration & config);
   void initializeRobot(const mc_rtc::Configuration & config);
   void initializeRLPolicy(const mc_rtc::Configuration & config);
   void initializeState();
@@ -54,6 +56,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   bool isTorqueControl = false;
 
   // Robot specific data
+  std::string robotName;
   std::vector<std::string> jointNames;
   size_t dofNumber_with_floatingBase = 0;
   size_t dofNumber = 0;
