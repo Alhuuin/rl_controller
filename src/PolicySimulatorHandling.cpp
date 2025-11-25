@@ -12,9 +12,11 @@ PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_na
     simulatorName(simulator_name), robotName(robot_name)
 {
   // check if simuToMcRtcIdx_ needs initialization
-  if (!simuToMcRtcIdx_.empty())
+  if (!mcRtcToSimuIdx_.empty())
   {
     mc_rtc::log::warning("Simulator mapping for {} on {} manually initialized in header", simulator_name, robot_name);
+    simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
+    return;
   }
   if(robot_name == "H1" && (simulator_name == "Maniskill" || simulator_name == "IsaacLab"))
   {

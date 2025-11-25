@@ -443,10 +443,8 @@ void RLController::addGui(const mc_rtc::Configuration & config)
 
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
 {
-  // H1 joints in mc_rtc/URDF order (based on unitree_sdk2 reorder_obs function)
-  //get the configured joints order depending on the robot used
+  // get the joints order (urdf) depending on the robot used
   robotName = config("policies")[currentPolicyIndex]("robot_name", std::string("H1"));
-
   auto mcRtcJointsOrder = config("Robot")(robotName)("mc_rtc_joints_order");
 
   dofNumber = robot().mb().nrDof() - 6; // Remove the floating base part (6 DoF)

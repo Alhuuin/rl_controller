@@ -1,50 +1,70 @@
-# RLController - RL Policy FSM Controller for H1 Robot
+# RLController
 
-This FSM controller integrates reinforcement learning policies with mc_rtc for controlling the H1 humanoid robot.
+An FSM controller that integrates reinforcement learning policies with [mc_rtc](https://jrl-umi3218.github.io/mc_rtc/) for robotic control. This package provides example policies for the H1 humanoid robot and supports ONNX format for policy deployment.
 
-**Note**: ONNX Runtime is included in this repository, so no external installation is required
+**Note**: ONNX Runtime is bundled with this repository—no external installation required.
+
+## Architecture
+
+The controller is organized into the following components:
+
+- **[etc/RLController.in.yaml](etc/RLController.in.yaml)**: Main configuration file for the controller
+- **[RLController](src/RLController.cpp)**: Core FSM controller that integrates RL policies with mc_rtc
+- **[RLPolicyInterface](src/RLPolicyInterface.cpp)**: Handles ONNX model loading and inference
+- **[PolicySimulatorHandling](src/PolicySimulatorHandling.cpp)**: Manages simulator-specific variations (e.g., joint ordering differences)
+- **[states/RL_State](src/states/RL_State.cpp)**: FSM state that executes the RL policy and applies torque commands
 
 ## Building
 
 ```bash
 mkdir -p build && cd build
-
 cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
-
 make -j$(nproc)
-
 make install
 ```
 
 ## Usage
 
-### 1. Specify your ONNX model
+### Robot and Simulator Support
 
-Default policies are provided in the `policy/` directory.
+The controller is optimized for the H1 humanoid robot with minimal configuration required. Support for other robots is possible with additional adaptation (see [Adding a New Robot](#adding-a-new-robot)).
 
-To specify the used policy, specify its path in the `policy_path` entry of the `etc/RLController.in.yaml` config file.
+Policies trained in ManiSkill and IsaacLab are fully supported. For policies from other training environments, you can add custom simulator support (see [Adding a New Simulator](#adding-a-new-simulator)).
 
-```yaml
-RLController:
-  policy_path: "path/to/your/policy.onnx"
-```
+### Policy Management
 
-The observation vector is for now harcoded and needs to be changed in `utils.cpp`.
+Default policies are located in the [`policy/`](policy/) directory. The controller supports switching between multiple policies at runtime through the GUI (`RLController/Policy` section).
 
-### 2. Model Requirements
+**Important**: Policy transitions should be compatible with the current state. For example, switching from standing to walking works because the walking policy can handle observations from a standing state, but the reverse may not be true without proper handling.
 
-Currently, only ONNX models are supported.
-The accepted shapes are :
-- **Input tensor**: Observation vector (supports both `[obs_size]` and `[batch, obs_size]` formats)
-- **Output tensor**: Action vector (supports both `[action_size]` and `[batch, action_size]` formats)
+### Configuring Policies
 
-The controller automatically detects the input/output dimensions from your model.
+- **Add your policy files** to the [`policy/`](policy/) directory (ONNX format)
 
-## Architecture
+- **Configure policy parameters** in [`etc/RLController.in.yaml`](etc/RLController.in.yaml). Each policy can specify:
+   - Robot name
+   - Control mode (position/torque)
+   - QP usage
+   - Simulator used during training
+   - Controlled joints indices
+   - PD gains (kp and kd)
 
-The repository consists of:
+- **Define observation vectors** in [`src/utils.cpp`](src/utils.cpp#L131) (l.131). The file includes default examples for:
+   - Standing policy (case 0)
+   - Walking policies (cases 1-2)
 
-- **RLController**: Main FSM controller integrating RL with mc_rtc
-- **RLPolicyInterface**: ONNX model loading and inference
-- **PolicySimulatorHandling**: Handling of the variation of format due to specific simulators (ex : joint order change)
-- **RL_State**: FSM State that runs the RL policy and applies torque commands
+## Advanced Setup
+
+### Adding a New Simulator
+
+Some simulators use different joint ordering than the URDF/mc_rtc convention. To add support:
+
+- Define the joint mapping in [`src/PolicySimulatorHandling.h`](src/PolicySimulatorHandling.h) by setting the `mcRtcToSimuIdx_` member variable
+- If the mapping is defined in the header, the class will automatically handle unrecognized simulator or robot names
+
+### Adding a New Robot
+
+To use the controller with a different robot, modify the following:
+
+- **Configuration file** ([`etc/RLController.in.yaml`](etc/RLController.in.yaml#L60) (l.60)) : Add your robot under the `Robot` category with the `mc_rtc_joints_order` corresponding to the joints in URDF order
+- **Joint mapping** ([`src/PolicySimulatorHandling.h`](src/PolicySimulatorHandling.h)): Specify the `mcRtcToSimuIdx_` mapping for your robot, similar to adding a new simulator 
