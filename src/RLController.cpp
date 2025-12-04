@@ -110,6 +110,8 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   // Update policy-specific boolean flags
   useQP = config("policies")[currentPolicyIndex]("use_QP", true);
   isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
+  if(isTorqueControl) datastore().get<std::string>("ControlMode") = "Torque";
+  else datastore().get<std::string>("ControlMode") = "Position";
   
   // Update robot name (in case it changes between policies)
   robotName = config("policies")[currentPolicyIndex]("robot_name", std::string("H1"));
@@ -170,6 +172,12 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   mc_rtc::log::info("[RLController] PD gains updated for policy [{}] with ratio {}", currentPolicyIndex, pd_gains_ratio);
   mc_rtc::log::info("[RLController] base kp: {}", kp_vector.transpose());
   mc_rtc::log::info("[RLController] base kd: {}", kd_vector.transpose());
+
+  // Update current PD gains if needed
+  if((datastore().has(robot().name() + "::GetPDGains") && isCorrectGain()))
+    setPDGains(kp_vector, kd_vector);
+  else
+    mc_rtc::log::warning("Cannot set PD gains ratio, SetPDGains not found in datastore");
   
   // Load the policy file
   std::string policyDir = std::string(PROJECT_SOURCE_DIR) + "/policy/";
@@ -456,7 +464,10 @@ void RLController::addGui(const mc_rtc::Configuration & config)
       [this](double v) { 
         pd_gains_ratio = v;
         // Update the actual gains on the robot when ratio changes
-        setPDGains(kp_vector, kd_vector);
+        if(datastore().has(robot().name() + "::SetPDGains"))
+          setPDGains(kp_vector, kd_vector);
+        else
+          mc_rtc::log::warning("Cannot set PD gains ratio, SetPDGains not found in datastore");
       }, 0.0, 2.0)
   );
   
@@ -749,21 +760,20 @@ bool RLController::setPDGains(Eigen::VectorXd p_vec, Eigen::VectorXd d_vec)
   return datastore().call<bool>(robot_name + "::SetPDGains", proportionalGains_vec, dampingGains_vec);
 }
 
-bool RLController::isHighGain(double tol)
+bool RLController::isCorrectGain(double tol)
 {
   // Get current gains from robot and update cache
   std::tie(current_kp, current_kd) = getPDGains();
   // Check if the current gains are close to the target gains (with ratio)
   Eigen::VectorXd target_kp = pd_gains_ratio * kp_vector;
   Eigen::VectorXd target_kd = pd_gains_ratio * kd_vector;
-  bool lowGain = ((current_kp - target_kp).norm() < tol) && ((current_kd - target_kd).norm() < tol);
-  bool highGain = !lowGain;
+  bool changeGain = ((current_kp - target_kp).norm() >= tol) || ((current_kd - target_kd).norm() >= tol);
   mc_rtc::log::info("[RLController] current_kp: {}", current_kp.transpose());
   mc_rtc::log::info("[RLController] current_kd: {}", current_kd.transpose());
   mc_rtc::log::info("[RLController] target_kp (ratio {}): {}", pd_gains_ratio, target_kp.transpose());
   mc_rtc::log::info("[RLController] target_kd (ratio {}): {}", pd_gains_ratio, target_kd.transpose());
-  mc_rtc::log::info("[RLController] isHighGain: {}", highGain);
-  return highGain;
+  mc_rtc::log::info("[RLController] gains correction needed: {}", changeGain);
+  return changeGain;
 }
 
 void RLController::initializeState()
@@ -775,8 +785,11 @@ void RLController::initializeState()
     datastore().call("EF_Estimator::toggleActive");
   }
 
-  // Set low gains for RL
-  if(isHighGain()) setPDGains(kp_vector, kd_vector);
+  // Set low gains for RL if necesssary
+  if((datastore().has(robot().name() + "::GetPDGains") && isCorrectGain()))
+    setPDGains(kp_vector, kd_vector);
+  else
+    mc_rtc::log::warning("Cannot set PD gains ratio, SetPDGains not found in datastore");
   tasksComputation(q_rl);
 }
 

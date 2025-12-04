@@ -43,7 +43,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   void tasksComputation(Eigen::VectorXd & currentTargetPosition);
   std::tuple<Eigen::VectorXd, Eigen::VectorXd> getPDGains();
   bool setPDGains(Eigen::VectorXd p_vec, Eigen::VectorXd d_vec);
-  bool isHighGain(double tol = 1e-9);
+  bool isCorrectGain(double tol = 1e-9);
   std::pair<sva::PTransformd, Eigen::Vector3d>  createContactAnchor(const mc_rbdyn::Robot & anchorRobot);
 
   void computeRLStateSimulated(); // Compute the state of the robot as if it was simulated with the RL policy
