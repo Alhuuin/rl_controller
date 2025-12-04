@@ -48,6 +48,20 @@ add_library(${PROJECT_NAME} SHARED ${SRC} ${HDR})
 set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-DRLCONTROLLER_EXPORTS")
 target_link_libraries(${PROJECT_NAME} PUBLIC mc_rtc::mc_control_fsm)
 
+# Add mc_joystick_plugin include directory if available (header-only)
+find_path(MC_JOYSTICK_INCLUDE_DIR
+  NAMES mc_joystick_plugin/joystick_inputs.h
+  HINTS ${CMAKE_INSTALL_PREFIX} ENV CMAKE_PREFIX_PATH
+  PATH_SUFFIXES include
+)
+
+if(MC_JOYSTICK_INCLUDE_DIR)
+  target_include_directories(${PROJECT_NAME} PUBLIC ${MC_JOYSTICK_INCLUDE_DIR})
+  message(STATUS "Found mc_joystick_plugin headers at ${MC_JOYSTICK_INCLUDE_DIR}")
+else()
+  message(STATUS "mc_joystick_plugin headers not found - joystick functionality will be unavailable")
+endif()
+
 # ---- Plugin target (mc_rtc controller entry point) ----
 
 add_controller(${PROJECT_NAME}_controller lib.cpp "")

@@ -177,6 +177,7 @@ policies:
         right_shoulder_roll_joint: 5.0
         right_shoulder_yaw_joint: 5.0
         right_elbow_joint: 5.0
+    speed_multiplier_joystick: 0.4
   # index 2 : better walking policy
   - robot_name: "H1"
     is_torque_control: true
@@ -224,6 +225,7 @@ policies:
         right_shoulder_roll_joint: 5.0
         right_shoulder_yaw_joint: 5.0
         right_elbow_joint: 5.0
+    speed_multiplier_joystick: 0.4
 
 use_async_inference: false
 

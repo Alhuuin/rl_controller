@@ -7,6 +7,7 @@
 #include <mc_rtc/gui/ArrayInput.h>
 #include <mc_rtc/logging.h>
 #include <mc_rbdyn/configuration_io.h>
+#include <mc_joystick_plugin/joystick_inputs.h>
 #include <chrono>
 #include <cmath>
 #include <numeric>
@@ -43,6 +44,12 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
 
 bool RLController::run()
 {
+  // Test joystick inputs
+  if(datastore().has("Joystick::connected") && datastore().get<bool>("Joystick::connected"))
+  {
+    RLuseJoyStickInputs();
+  }
+  
   counter += timeStep;
   leftAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("left_ankle_link")].translation();
   rightAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("right_ankle_link")].translation();
@@ -82,6 +89,52 @@ void RLController::reset(const mc_control::ControllerResetData & reset_data)
 {
   mc_control::fsm::Controller::reset(reset_data);
   mc_rtc::log::success("RLController reset completed");
+}
+
+void RLController::RLuseJoyStickInputs()
+{
+  // Get joystick functions
+  auto & buttonFunc = datastore().get<std::function<bool(joystickButtonInputs)>>("Joystick::Button");
+  auto & stickFunc = datastore().get<std::function<Eigen::Vector2d(joystickAnalogicInputs)>>("Joystick::Stick");
+  
+  // Read stick values
+  leftStick = stickFunc(joystickAnalogicInputs::L_STICK);
+  double vel_x = (leftStick(0) - 0.50395972) * 2.0 * speedMultiplier_joystick; // Forward/backward (compensate for joystick center offset)
+  double vel_y = (leftStick(1) - 0.5157702) * 2.0 * speedMultiplier_joystick; // Left/right
+  velCmdRL_(0) = vel_x;
+  velCmdRL_(1) = vel_y;
+  
+  // Read D-pad buttons
+  DirectionButtons = {
+    datastore().get<bool>("Joystick::UpPad"),
+    datastore().get<bool>("Joystick::DownPad"),
+    datastore().get<bool>("Joystick::LeftPad"),
+    datastore().get<bool>("Joystick::RightPad")
+  };
+
+  for (size_t i = 0; i < DirectionButtons.size(); ++i)
+  {
+    if(DirectionButtons[i])
+    {
+      switch(i)
+      {
+        case 0: // Up
+          velCmdRL_(0) += 1.0 * speedMultiplier_joystick;
+          break;
+        case 1: // Down
+          velCmdRL_(0) -= 1.0 * speedMultiplier_joystick;
+          break;
+        case 2: // Left
+          velCmdRL_(1) += 1.0 * speedMultiplier_joystick;
+          break;
+        case 3: // Right
+          velCmdRL_(1) -= 1.0 * speedMultiplier_joystick;
+          break;
+        default:
+          break;
+      }
+    }
+  }
 }
 
 void RLController::loadConfig(const mc_rtc::Configuration & config)
@@ -680,6 +733,7 @@ void RLController::configRL(const mc_rtc::Configuration & config)
     usedJoints_simuOrder = std::vector<int>(dofNumber);
     std::iota(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end(), 0);
   }
+  speedMultiplier_joystick = config("policies")[currentPolicyIndex]("speed_multiplier_joystick", 0.3);
 }
 
 std::tuple<Eigen::VectorXd, Eigen::VectorXd> RLController::getPDGains()

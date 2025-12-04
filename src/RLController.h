@@ -30,6 +30,8 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 
   void reset(const mc_control::ControllerResetData & reset_data) override;
 
+  void RLuseJoyStickInputs();
+
   void loadConfig(const mc_rtc::Configuration & config);
   void switchPolicy(int policyIndex, const mc_rtc::Configuration & config);  // Switch to a different policy at runtime
   void addLog();
@@ -195,4 +197,8 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::VectorXd floatingBase_alphaIn;
 
   double counter = 0.0; // Time counter in seconds
+
+  std::vector<bool> DirectionButtons = std::vector<bool>(4, false); // Up, Down, Left, Right
+  Eigen::Vector2d leftStick = Eigen::Vector2d(0.5, 0.5); // x (UP), y (LEFT)
+  double speedMultiplier_joystick;
 };
