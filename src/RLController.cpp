@@ -3,6 +3,7 @@
 #include <RBDyn/MultiBodyConfig.h>
 #include <SpaceVecAlg/SpaceVecAlg>
 #include <eigen3/Eigen/src/Core/Matrix.h>
+#include <mc_rtc/Configuration.h>
 #include <mc_rtc/gui/ArrayInput.h>
 #include <mc_rtc/logging.h>
 #include <mc_rbdyn/configuration_io.h>
@@ -115,44 +116,8 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   
   // Update robot name (in case it changes between policies)
   robotName = config("policies")[currentPolicyIndex]("robot_name", std::string("H1"));
-  
-  // Update simulator handling
-  std::string simulator = config("policies")[currentPolicyIndex]("simulator", std::string(""));
-  if (simulator.empty()) {
-    mc_rtc::log::warning("Simulator not set, using default handling");
-    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>();
-  } else {
-    mc_rtc::log::info("Using {} handling", simulator);
-    policySimulatorHandling_ = std::make_unique<PolicySimulatorHandling>(simulator, robotName);
-  }
-  
-  // Update used joints
-  usedJoints_mcRtcOrder = config("policies")[currentPolicyIndex]("used_joints_index", std::vector<int>{});
-  if(!usedJoints_mcRtcOrder.empty()) {
-    usedJoints_simuOrder = policySimulatorHandling_->getSimulatorIndices(usedJoints_mcRtcOrder);
-    std::sort(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end());
-    
-    std::string jointsStrMc = "[";
-    for(size_t i = 0; i < usedJoints_mcRtcOrder.size(); ++i) {
-      if(i > 0) jointsStrMc += ", ";
-      jointsStrMc += std::to_string(usedJoints_mcRtcOrder[i]);
-    }
-    jointsStrMc += "]";
-    
-    std::string jointsStrSimu = "[";
-    for(size_t i = 0; i < usedJoints_simuOrder.size(); ++i) {
-      if(i > 0) jointsStrSimu += ", ";
-      jointsStrSimu += std::to_string(usedJoints_simuOrder[i]);
-    }
-    jointsStrSimu += "]";
-    
-    mc_rtc::log::info("Using custom used joints (mc_rtc order): {}", jointsStrMc);
-    mc_rtc::log::info("Using custom used joints (simu order): {}", jointsStrSimu);
-  } else {
-    mc_rtc::log::info("Using all joints");
-    usedJoints_simuOrder = std::vector<int>(dofNumber);
-    std::iota(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end(), 0);
-  }
+
+  configRL(config);
 
   // Update PD gains
   pd_gains_ratio = config("policies")[currentPolicyIndex]("pd_gains_ratio", 1.0);
@@ -178,26 +143,6 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
     setPDGains(kp_vector, kd_vector);
   else
     mc_rtc::log::warning("Cannot set PD gains ratio, SetPDGains not found in datastore");
-  
-  // Load the policy file
-  std::string policyDir = std::string(PROJECT_SOURCE_DIR) + "/policy/";
-  std::string fullPath = policyPaths[currentPolicyIndex];
-  if(fullPath[0] != '/') {
-    fullPath = policyDir + fullPath;
-  }
-  
-  try {
-    rlPolicy_ = std::make_unique<RLPolicyInterface>(fullPath);
-    if(rlPolicy_) {
-      currentObservation_ = Eigen::VectorXd::Zero(rlPolicy_->getObservationSize());
-      mc_rtc::log::success("Policy switched successfully to [{}]: {}", currentPolicyIndex, policyPaths[currentPolicyIndex]);
-      mc_rtc::log::info("Observation size: {}", rlPolicy_->getObservationSize());
-      mc_rtc::log::info("Action size: {}", rlPolicy_->getActionSize());
-    }
-  } catch(const std::exception& e) {
-    mc_rtc::log::error("Failed to load policy: {}", e.what());
-    return;
-  }
 }
 
 void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
@@ -674,7 +619,13 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   // velCmdRL_(2) = 0.5;
   phase_ = 0.0;  // Phase for periodic gait
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
-  
+
+  // load policy specific configuration
+  configRL(config);
+}
+
+void RLController::configRL(const mc_rtc::Configuration & config)
+{
   mc_rtc::log::info("Loading RL policy [{}]: {}", currentPolicyIndex, policyPaths[currentPolicyIndex]);
   try {
     rlPolicy_ = std::make_unique<RLPolicyInterface>(policyPaths[currentPolicyIndex]);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mc_control/fsm/Controller.h>
+#include <mc_rtc/Configuration.h>
 #include <mc_tasks/TorqueTask.h>
 #include <mc_tasks/PostureTask.h>
 
@@ -36,6 +37,8 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   void initializeRobot(const mc_rtc::Configuration & config);
   void initializeRLPolicy(const mc_rtc::Configuration & config);
   void initializeState();
+
+  void configRL(const mc_rtc::Configuration & config);
 
   void updateRobotCmdAfterQP();
   void computeInversePD(); // Update q_cmd based on QP acceleration
