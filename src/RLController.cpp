@@ -195,7 +195,7 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   if((datastore().has(robot().name() + "::GetPDGains") && isCorrectGain()))
     setPDGains(kp_vector, kd_vector);
   else
-    mc_rtc::log::warning("Cannot set PD gains ratio, SetPDGains not found in datastore");
+    mc_rtc::log::warning("Will not change PD gains, SetPDGains not found in datastore OR no change needed");
 }
 
 void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
@@ -430,6 +430,9 @@ void RLController::addGui(const mc_rtc::Configuration & config)
   // Add a button to change the velocity command
   gui()->addElement({"RLController", "Policy"},
   mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL_));
+  // Add a button to change the speed multiplier for joystick
+  gui()->addElement({"RLController", "Policy"},
+  mc_rtc::gui::NumberInput("Speed Multiplier Joystick", speedMultiplier_joystick));
 
   // Add a dropdown to select policy
   gui()->addElement(
@@ -454,6 +457,14 @@ void RLController::addGui(const mc_rtc::Configuration & config)
         }
       }
     )
+  );
+  // Add a button to reload the current policy
+  gui()->addElement(
+    {"RLController", "Policy"},
+    mc_rtc::gui::Button("Reload current policy", [this, config]() {
+      mc_rtc::log::info("User requested to reload current policy [{}]", currentPolicyIndex);
+      switchPolicy(currentPolicyIndex, config);
+    })
   );
 
   // Add PD gains ratio slider
@@ -794,7 +805,7 @@ void RLController::initializeState()
   if((datastore().has(robot().name() + "::GetPDGains") && isCorrectGain()))
     setPDGains(kp_vector, kd_vector);
   else
-    mc_rtc::log::warning("Cannot set PD gains ratio, SetPDGains not found in datastore");
+    mc_rtc::log::warning("Will not change PD gains, SetPDGains not found in datastore OR no change needed");
   tasksComputation(q_rl);
 }
 
