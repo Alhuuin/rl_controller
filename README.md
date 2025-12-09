@@ -16,6 +16,12 @@ The controller is organized into the following components:
 
 ## Building
 
+### Dependencies
+
+All required dependencies and their specific versions are available in this branch of the [mc_rtc_superbuild](https://github.com/Alhuuin/mc-rtc-superbuild/tree/rl_controller) if you need a quick installation setup.
+
+### Build commands
+
 ```bash
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -37,18 +43,25 @@ Default policies are located in the [`policy/`](policy/) directory. The controll
 
 **Important**: Policy transitions should be compatible with the current state. For example, switching from standing to walking works because the walking policy can handle observations from a standing state, but the reverse may not be true without proper handling.
 
+### Velocity Control with Joystick
+
+For policies that support velocity commands, control using the mc_joystick plugin is now supported. This allows real-time velocity control through a game controller using the left joystick or left arrows.
+
 ### Configuring Policies
 
 - **Add your policy files** to the [`policy/`](policy/) directory (ONNX format)
 
 - **Configure policy parameters** in [`etc/RLController.in.yaml`](etc/RLController.in.yaml). Each policy can specify:
-   - Robot name
-   - Control mode (position/torque)
-   - QP usage
-   - Simulator used during training
-   - Controlled joints indices
+   - Robot name*
+   - Control mode (position/torque)*
+   - QP usage (true/false)*
+   - Simulator used during training*
+   - Joints indices by policy*
    - PD gains ratio
-   - PD gains (kp and kd)
+   - PD gains (kp and kd)*
+   - speed of the control (in m/s) when using the joystick plugin
+
+Parameters with "*" are necessary. The others are optional.
 
 - **Define observation vectors** in [`src/utils.cpp`](src/utils.cpp#L131) (l.131). The file includes default examples for:
    - Standing policy (case 0)
