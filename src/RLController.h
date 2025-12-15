@@ -34,6 +34,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 
   void loadConfig(const mc_rtc::Configuration & config);
   void switchPolicy(int policyIndex, const mc_rtc::Configuration & config);  // Switch to a different policy at runtime
+
   void addLog();
   void addGui(const mc_rtc::Configuration & config);
   void initializeRobot(const mc_rtc::Configuration & config);
@@ -48,10 +49,12 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   void tasksComputation(Eigen::VectorXd & currentTargetPosition);
   std::tuple<Eigen::VectorXd, Eigen::VectorXd> getPDGains();
   bool setPDGains(Eigen::VectorXd p_vec, Eigen::VectorXd d_vec);
-  bool isCorrectGain(double tol = 1e-9);
+  bool gainsUpdateRequired(double tol = 1e-9);
   std::pair<sva::PTransformd, Eigen::Vector3d>  createContactAnchor(const mc_rbdyn::Robot & anchorRobot);
 
   void computeRLStateSimulated(); // Compute the state of the robot as if it was simulated with the RL policy
+
+  double tau_left_elbow_joint_ = 0.0;
 
   // Task
   std::shared_ptr<mc_tasks::TorqueTask> torqueTask;
@@ -68,11 +71,14 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   size_t dofNumber = 0;
 
   // Gains
-  Eigen::VectorXd kp_vector;  // Base PD gains from config
-  Eigen::VectorXd kd_vector;  // Base PD gains from config
-  Eigen::VectorXd current_kp; // Actual gains currently set on the robot/simulator
-  Eigen::VectorXd current_kd; // Actual gains currently set on the robot/simulator
-  // Actual gains sent to robot = pd_gains_ratio * kp_vector (or kd_vector)
+  Eigen::VectorXd kp_standing;  // Base PD gains from config, used in Standing_State
+  Eigen::VectorXd kd_standing;  // Base PD gains from config, used in Standing_State
+  Eigen::VectorXd kp_vector;  // Gains set to the robot/simulator = pd_gains_ratio * rl_kp
+  Eigen::VectorXd kd_vector;  // Gains set to the robot/simulator = pd_gains_ratio * rl_kd
+  Eigen::VectorXd current_kp; // Gains get from the robot/simulator, used to check if we need to update
+  Eigen::VectorXd current_kd; // Gains get from the robot/simulator, used to check if we need to update
+  Eigen::VectorXd rl_kp; // Base RL PD gains from config
+  Eigen::VectorXd rl_kd; // Base RL PD gains from config
 
   // Options
   bool compensateExternalForces = false;
@@ -155,7 +161,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 
   double velPercent = 0.9;
   double dsPercent = 0.01;
-  double diPercent = 0.2;
+  double diPercent = 0.4;
 
   Eigen::VectorXd jointLimitsPos_upper;
   Eigen::VectorXd jointLimitsPos_lower;
@@ -167,17 +173,6 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::VectorXd jointLimitsHardVel_lower;
   Eigen::VectorXd jointLimitsHardTau_upper;
   Eigen::VectorXd jointLimitsHardTau_lower;
-
-  Eigen::VectorXd limitBreached_q_soft_upper;
-  Eigen::VectorXd limitBreached_q_soft_lower;
-  Eigen::VectorXd limitBreached_q_hard_upper;
-  Eigen::VectorXd limitBreached_q_hard_lower;
-  Eigen::VectorXd limitBreached_qDot_soft_upper;
-  Eigen::VectorXd limitBreached_qDot_soft_lower;
-  Eigen::VectorXd limitBreached_qDot_hard_upper;
-  Eigen::VectorXd limitBreached_qDot_hard_lower;
-  Eigen::VectorXd limitBreached_tau_upper;
-  Eigen::VectorXd limitBreached_tau_lower;
 
   // State after QP without any modification
   std::vector<std::vector<double>> qOut;
@@ -199,6 +194,10 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   double counter = 0.0; // Time counter in seconds
 
   std::vector<bool> DirectionButtons = std::vector<bool>(4, false); // Up, Down, Left, Right
+  double joystickDeadZone = 0.02; // Dead zone for joystick inputs
   Eigen::Vector2d leftStick = Eigen::Vector2d(0.5, 0.5); // x (UP), y (LEFT)
-  double speedMultiplier_joystick;
+  Eigen::Vector2d rightStick = Eigen::Vector2d(0.5, 0.5); // x (UP), y (LEFT)
+  double maxVelCmd;
+  double maxYawCmd;
+  sva::PTransformd contact_anchor_tf;
 };
