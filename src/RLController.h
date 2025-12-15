@@ -71,8 +71,6 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   size_t dofNumber = 0;
 
   // Gains
-  Eigen::VectorXd kp_standing;  // Base PD gains from config, used in Standing_State
-  Eigen::VectorXd kd_standing;  // Base PD gains from config, used in Standing_State
   Eigen::VectorXd kp_vector;  // Gains set to the robot/simulator = pd_gains_ratio * rl_kp
   Eigen::VectorXd kd_vector;  // Gains set to the robot/simulator = pd_gains_ratio * rl_kd
   Eigen::VectorXd current_kp; // Gains get from the robot/simulator, used to check if we need to update

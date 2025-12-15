@@ -573,8 +573,6 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   tau_d = Eigen::VectorXd::Zero(dofNumber);
   kp_vector = Eigen::VectorXd::Zero(dofNumber);
   kd_vector = Eigen::VectorXd::Zero(dofNumber);
-  kp_standing = Eigen::VectorXd::Zero(dofNumber);
-  kd_standing = Eigen::VectorXd::Zero(dofNumber);
   currentPos = Eigen::VectorXd::Zero(dofNumber);
   currentVel = Eigen::VectorXd::Zero(dofNumber);
   currentTau = Eigen::VectorXd::Zero(dofNumber);
@@ -597,8 +595,6 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   size_t i = 0;
   std::vector<std::string> joint_names;
   joint_names.reserve(robot().mb().joints().size());
-  std::map<std::string, double> kp_standing_map = config("Robot")(robotName)("standing")("kp");
-  std::map<std::string, double> kd_standing_map = config("Robot")(robotName)("standing")("kd");
   
   for (const auto &j : robot().mb().joints()) {
       const std::string &joint_name = j.name();
@@ -608,8 +604,6 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
         if (const auto &t = posture[robot().jointIndexByName(joint_name)]; !t.empty()) {
             kp_vector[i] = kp.at(joint_name);
             kd_vector[i] = kd.at(joint_name);
-            kp_standing[i] = kp_standing_map[joint_name];
-            kd_standing[i] = kd_standing_map[joint_name];
             q_rl[i] = t[0];
             q_zero_vector[i] = t[0];
             torque_target[joint_name] = {0.0};
