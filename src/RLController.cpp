@@ -214,6 +214,7 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
       kd_vector(i) = kd[jName];
     }
   }
+  // Update PD gains if necessary
   setPDGains(kp_vector, kd_vector);    
 }
 
@@ -444,12 +445,6 @@ void RLController::addGui(const mc_rtc::Configuration & config)
   mc_rtc::gui::NumberInput("Max Vel via Joystick", maxVelCmd));
   gui()->addElement({"RLController", "Policy"},
   mc_rtc::gui::NumberInput("Max yaw via Joystick", maxYawCmd));
-  gui()->addElement({"RLController", "Policy"},
-  mc_rtc::gui::NumberSlider("Tau Left Elbow Joint", [this]() { return tau_left_elbow_joint_; },
-    [this](double v) { 
-      tau_left_elbow_joint_ = v;
-    }, -1.0, 1.0)
-  );
 
   // Add a dropdown to select policy
   gui()->addElement(
@@ -823,9 +818,7 @@ bool RLController::gainsUpdateRequired(double tol)
 
 void RLController::initializeState()
 {
-  if(isTorqueControl) datastore().get<std::string>("ControlMode") = "Torque";
-  else datastore().get<std::string>("ControlMode") = "Position";
-
+  // Update PD gains if necessary
   setPDGains(kp_vector, kd_vector);
   tasksComputation(q_rl);
 }
