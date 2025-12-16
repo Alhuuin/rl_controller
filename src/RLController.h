@@ -54,8 +54,6 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 
   void computeRLStateSimulated(); // Compute the state of the robot as if it was simulated with the RL policy
 
-  double tau_left_elbow_joint_ = 0.0;
-
   // Task
   std::shared_ptr<mc_tasks::TorqueTask> torqueTask;
 
