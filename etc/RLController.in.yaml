@@ -17,6 +17,8 @@ StatesFiles:
 # If true, state factory will be more verbose
 VerboseStateFactory: false
 
+Plugins: [ExternalForcesEstimator]
+
 # Robot and environment setup
 robots:
   ground:
@@ -82,6 +84,7 @@ Robot:
     ]
 
 policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx"]  # Path to the RL policy file(s)
+default_policy_index: 2 # Index of the default policy to use
 policies:
   # index 0 : standing_policy
   - robot_name: "H1"

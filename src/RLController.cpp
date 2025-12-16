@@ -20,7 +20,7 @@
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config)
 : mc_control::fsm::Controller(rm, dt, config, Backend::TVM)
 {
-  currentPolicyIndex = 0;  // Start with first policy
+  currentPolicyIndex = config("default_policy_index", 0);
   loadConfig(config);
 
   //Initialize Constraints

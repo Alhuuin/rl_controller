@@ -20,6 +20,8 @@ The controller is organized into the following components:
 
 All required dependencies and their specific versions are available in this branch of the [mc_rtc_superbuild](https://github.com/Alhuuin/mc-rtc-superbuild/tree/rl_controller) if you need a quick installation setup.
 
+The use of the ExternalForcesEstimator plugin is highly necessary, it is thus enabled by default in the controller config file.
+
 ### Build commands
 
 ```bash
@@ -45,7 +47,7 @@ Default policies are located in the [`policy/`](policy/) directory. The controll
 
 ### Velocity Control with Joystick
 
-For policies that support velocity commands, control using the mc_joystick plugin is now supported. This allows real-time velocity control through a game controller using the left joystick or left arrows.
+For policies that support velocity commands, control using the mc_joystick plugin is now supported. This allows real-time velocity yaw control through a game controller using the left joystick or left arrows and yaw control using the right joystick.
 
 ### Configuring Policies
 
