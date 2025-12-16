@@ -72,21 +72,20 @@ void utils::run_rl_state(mc_control::fsm::Controller & ctl_, std::string state_n
         }
       }    
     }
-    else if(syncTime_ >= INFERENCE_PERIOD_MS/1000)
-    {
-      // mc_rtc::log::info("FREQ: {:.1f} Hz", 1.0 / (syncTime_));
-      syncPhase_ += ctl.timeStep;
-      ctl.phase_ = fmod(syncPhase_ * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
-      ctl.currentObservation_ = getCurrentObservation(ctl);
-      ctl.currentAction_ = ctl.rlPolicy_->predict(ctl.currentObservation_);
-      applyAction(ctl, ctl.currentAction_);
-      syncTime_ = 0.0;
-    }
     else
     {
       syncTime_ += ctl.timeStep;
       syncPhase_ += ctl.timeStep;
       ctl.phase_ = fmod(syncPhase_ * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
+      if(syncTime_ >= INFERENCE_PERIOD_MS/1000)
+      {
+        // syncTime_ -=ctl.timeStep;
+        // // mc_rtc::log::info("FREQ: {:.1f} Hz", 1.0 / (syncTime_));
+        ctl.currentObservation_ = getCurrentObservation(ctl);
+        ctl.currentAction_ = ctl.rlPolicy_->predict(ctl.currentObservation_);
+        applyAction(ctl, ctl.currentAction_);
+        syncTime_ = 0.0;
+      }
     }
   }
   catch(const std::exception & e)

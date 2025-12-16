@@ -85,7 +85,7 @@ policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx"]  
 policies:
   # index 0 : standing_policy
   - robot_name: "H1"
-    is_torque_control: true
+    is_torque_control: false
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
@@ -132,7 +132,7 @@ policies:
         right_elbow_joint: 5.0
   # index 1 : walking_policy
   - robot_name: "H1"
-    is_torque_control: true
+    is_torque_control: false
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
@@ -180,11 +180,11 @@ policies:
     speed_multiplier_joystick: 0.4
   # index 2 : better walking policy
   - robot_name: "H1"
-    is_torque_control: true
+    is_torque_control: false
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
-    pd_gains_ratio: 1.0
+    pd_gains_ratio: 0.9
     kp:
         left_hip_yaw_joint: 200.0
         left_hip_roll_joint: 200.0

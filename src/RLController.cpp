@@ -5,6 +5,8 @@
 #include <eigen3/Eigen/src/Core/Matrix.h>
 #include <mc_rtc/Configuration.h>
 #include <mc_rtc/gui/ArrayInput.h>
+#include <mc_rtc/gui/NumberSlider.h>
+#include <mc_rtc/gui/Transform.h>
 #include <mc_rtc/logging.h>
 #include <mc_rbdyn/configuration_io.h>
 #include <mc_joystick_plugin/joystick_inputs.h>
@@ -59,7 +61,6 @@ bool RLController::run()
 
   auto qIn = real_robot.mbc().q;
   auto alphaIn = real_robot.mbc().alpha;
-  // auto tauIn = real_robot.mbc().jointTorque;
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
   Eigen::MatrixXd Kp_inv = (pd_gains_ratio * kp_vector).cwiseInverse().asDiagonal();
@@ -97,12 +98,29 @@ void RLController::RLuseJoyStickInputs()
   auto & buttonFunc = datastore().get<std::function<bool(joystickButtonInputs)>>("Joystick::Button");
   auto & stickFunc = datastore().get<std::function<Eigen::Vector2d(joystickAnalogicInputs)>>("Joystick::Stick");
   
-  // Read stick values
+  // Read sticks values
   leftStick = stickFunc(joystickAnalogicInputs::L_STICK);
-  double vel_x = (leftStick(0) - 0.50395972) * 2.0 * speedMultiplier_joystick; // Forward/backward (compensate for joystick center offset)
-  double vel_y = (leftStick(1) - 0.5157702) * 2.0 * speedMultiplier_joystick; // Left/right
+  // Apply dead zone
+  double vel_x = 0.0;
+  if(std::abs(leftStick(0) - 0.5) > joystickDeadZone)
+  {
+    vel_x = (leftStick(0) - 0.5) * 2.0 * maxVelCmd;
+  }
+  double vel_y = 0.0;
+  if(std::abs(leftStick(1) - 0.5) > joystickDeadZone)
+  {
+    vel_y = (leftStick(1) - 0.5) * 2.0 * maxVelCmd;
+  }
   velCmdRL_(0) = vel_x;
   velCmdRL_(1) = vel_y;
+
+  rightStick = stickFunc(joystickAnalogicInputs::R_STICK);
+  double yaw_cmd = 0.0;
+  if(std::abs(rightStick(1) - 0.5) > joystickDeadZone)
+  {
+    yaw_cmd = (rightStick(1) - 0.5) * 2.0 * maxYawCmd;
+  }
+  velCmdRL_(2) = yaw_cmd;
   
   // Read D-pad buttons
   DirectionButtons = {
@@ -119,16 +137,16 @@ void RLController::RLuseJoyStickInputs()
       switch(i)
       {
         case 0: // Up
-          velCmdRL_(0) += 1.0 * speedMultiplier_joystick;
+          velCmdRL_(0) += 1.0 * maxVelCmd;
           break;
         case 1: // Down
-          velCmdRL_(0) -= 1.0 * speedMultiplier_joystick;
+          velCmdRL_(0) -= 1.0 * maxVelCmd;
           break;
         case 2: // Left
-          velCmdRL_(1) += 1.0 * speedMultiplier_joystick;
+          velCmdRL_(1) += 1.0 * maxVelCmd;
           break;
         case 3: // Right
-          velCmdRL_(1) -= 1.0 * speedMultiplier_joystick;
+          velCmdRL_(1) -= 1.0 * maxVelCmd;
           break;
         default:
           break;
@@ -146,6 +164,16 @@ void RLController::loadConfig(const mc_rtc::Configuration & config)
   timingLogInterval_ = config("timing_log_interval");
   useQP = config("policies")[currentPolicyIndex]("use_QP", true);
   isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
+  if(isTorqueControl)
+  {
+    mc_rtc::log::info("Using Torque Control mode");
+    datastore().make<std::string>("ControlMode", "Torque");
+  }
+  else
+  {
+    mc_rtc::log::info("Using Position Control mode");
+    datastore().make<std::string>("ControlMode", "Position");
+  }
  
   initializeRobot(config);
   initializeRLPolicy(config);
@@ -176,7 +204,7 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   pd_gains_ratio = config("policies")[currentPolicyIndex]("pd_gains_ratio", 1.0);
   std::map<std::string, double> kp = config("policies")[currentPolicyIndex]("kp");
   std::map<std::string, double> kd = config("policies")[currentPolicyIndex]("kd");
-  
+
   for(size_t i = 0; i < dofNumber; ++i) {
     const auto & jName = robot().mb().joint(i + 1).name();  // +1 to skip Root
     if(kp.count(jName)) {
@@ -186,16 +214,8 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
       kd_vector(i) = kd[jName];
     }
   }
-  
-  mc_rtc::log::info("[RLController] PD gains updated for policy [{}] with ratio {}", currentPolicyIndex, pd_gains_ratio);
-  mc_rtc::log::info("[RLController] base kp: {}", kp_vector.transpose());
-  mc_rtc::log::info("[RLController] base kd: {}", kd_vector.transpose());
-
-  // Update current PD gains if needed
-  if((datastore().has(robot().name() + "::GetPDGains") && isCorrectGain()))
-    setPDGains(kp_vector, kd_vector);
-  else
-    mc_rtc::log::warning("Will not change PD gains, SetPDGains not found in datastore OR no change needed");
+  // Update PD gains if necessary
+  setPDGains(kp_vector, kd_vector);    
 }
 
 void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
@@ -360,16 +380,6 @@ void RLController::addLog()
   logger().addLogEntry("RLController_qdot_limHard_upper", [this]() { return jointLimitsHardVel_upper; });
   logger().addLogEntry("RLController_qdot_limHard_lower", [this]() { return jointLimitsHardVel_lower; });
   logger().addLogEntry("RLController_ankleDistanceNorm", [this]() { return ankleDistanceNorm; });
-  logger().addLogEntry("RLController_limitBreached_q_soft_upper", [this]() { return limitBreached_q_soft_upper; });
-  logger().addLogEntry("RLController_limitBreached_q_soft_lower", [this]() { return limitBreached_q_soft_lower; });
-  logger().addLogEntry("RLController_limitBreached_q_hard_upper", [this]() { return limitBreached_q_hard_upper; });
-  logger().addLogEntry("RLController_limitBreached_q_hard_lower", [this]() { return limitBreached_q_hard_lower; });
-  logger().addLogEntry("RLController_limitBreached_qdot_soft_upper", [this]() { return limitBreached_qDot_soft_upper; });
-  logger().addLogEntry("RLController_limitBreached_qdot_soft_lower", [this]() { return limitBreached_qDot_soft_lower; });
-  logger().addLogEntry("RLController_limitBreached_qdot_hard_upper", [this]() { return limitBreached_qDot_hard_upper; });
-  logger().addLogEntry("RLController_limitBreached_qdot_hard_lower", [this]() { return limitBreached_qDot_hard_lower; });
-  logger().addLogEntry("RLController_limitBreached_tau_hard_upper", [this]() { return limitBreached_tau_upper; });
-  logger().addLogEntry("RLController_limitBreached_tau_hard_lower", [this]() { return limitBreached_tau_lower; });
   logger().addLogEntry("RLController_tau_err", [this]() { return tau_err; });
   logger().addLogEntry("RLController_tau_err_norm", [this]() { return tau_err_norm; });
   logger().addLogEntry("RLController_qddot_err", [this]() { return qddot_err; }); 
@@ -432,7 +442,9 @@ void RLController::addGui(const mc_rtc::Configuration & config)
   mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL_));
   // Add a button to change the speed multiplier for joystick
   gui()->addElement({"RLController", "Policy"},
-  mc_rtc::gui::NumberInput("Speed Multiplier Joystick", speedMultiplier_joystick));
+  mc_rtc::gui::NumberInput("Max Vel via Joystick", maxVelCmd));
+  gui()->addElement({"RLController", "Policy"},
+  mc_rtc::gui::NumberInput("Max yaw via Joystick", maxYawCmd));
 
   // Add a dropdown to select policy
   gui()->addElement(
@@ -494,6 +506,10 @@ void RLController::addGui(const mc_rtc::Configuration & config)
       })
     );
   }
+
+  gui()->addElement({"RLController", "Options"},
+    mc_rtc::gui::Transform("Anchor Frame",contact_anchor_tf)
+  );
 }
 
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
@@ -516,17 +532,6 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   jointLimitsHardVel_lower = Eigen::VectorXd::Zero(dofNumber);
   jointLimitsHardTau_upper = Eigen::VectorXd::Zero(dofNumber);
   jointLimitsHardTau_lower = Eigen::VectorXd::Zero(dofNumber);
-
-  limitBreached_q_soft_upper = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_q_soft_lower = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_q_hard_upper = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_q_hard_lower = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_qDot_soft_upper = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_qDot_soft_lower = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_qDot_hard_upper = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_qDot_hard_lower = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_tau_upper = Eigen::VectorXd::Zero(dofNumber);
-  limitBreached_tau_lower = Eigen::VectorXd::Zero(dofNumber);
 
   for (size_t i = 0 ; i < robot().refJointOrder().size() ; i++)
   {
@@ -585,6 +590,7 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   size_t i = 0;
   std::vector<std::string> joint_names;
   joint_names.reserve(robot().mb().joints().size());
+  
   for (const auto &j : robot().mb().joints()) {
       const std::string &joint_name = j.name();
       if(j.type() == rbd::Joint::Type::Rev)
@@ -604,10 +610,9 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   current_kp = kp_vector;
   current_kd = kd_vector;
   solver().removeTask(FSMPostureTask);
-  datastore().make<std::string>("ControlMode", "Torque");
   if(!datastore().has("anchorFrameFunction"))
   {
-    datastore().make_call("anchorFrameFunction", [this](const mc_rbdyn::Robot & robot) {return createContactAnchor(robot);});
+    datastore().make_call("anchorFrameFunction", [this](const mc_rbdyn::Robot & real_robot) {return createContactAnchor(real_robot);});
   }
 
   // State after QP without any modification
@@ -677,10 +682,6 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   
   // Initialize new observation components
   velCmdRL_ = Eigen::Vector3d::Zero();  // Default command (x, y, yaw)
-  // Values for the aggressive trot
-  // velCmdRL_(0) = 1.09;
-  // velCmdRL_(1) = 0.6;
-  // velCmdRL_(2) = 0.5;
   phase_ = 0.0;  // Phase for periodic gait
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
 
@@ -744,7 +745,8 @@ void RLController::configRL(const mc_rtc::Configuration & config)
     usedJoints_simuOrder = std::vector<int>(dofNumber);
     std::iota(usedJoints_simuOrder.begin(), usedJoints_simuOrder.end(), 0);
   }
-  speedMultiplier_joystick = config("policies")[currentPolicyIndex]("speed_multiplier_joystick", 0.3);
+  maxVelCmd = config("policies")[currentPolicyIndex]("speed_multiplier_joystick", 0.6);
+  maxYawCmd = config("policies")[currentPolicyIndex]("max_yaw_joystick", 0.7);
 }
 
 std::tuple<Eigen::VectorXd, Eigen::VectorXd> RLController::getPDGains()
@@ -755,57 +757,69 @@ std::tuple<Eigen::VectorXd, Eigen::VectorXd> RLController::getPDGains()
   datastore().call<bool>(robot_name + "::GetPDGains", proportionalGains_vec, dampingGains_vec);
   Eigen::VectorXd p_vec = Eigen::VectorXd::Map(proportionalGains_vec.data(), proportionalGains_vec.size());
   Eigen::VectorXd d_vec = Eigen::VectorXd::Map(dampingGains_vec.data(), dampingGains_vec.size());
-  mc_rtc::log::info("[RLController] Current PD Gains for {} are:\n\tkp = {}\n\tkd = {}", robot_name, p_vec.transpose(), d_vec.transpose());
   return std::make_tuple(p_vec, d_vec);
 }
 
 bool RLController::setPDGains(Eigen::VectorXd p_vec, Eigen::VectorXd d_vec)
 {
+  // Set low gains for RL if necesssary
+  if(!(datastore().has(robot().name() + "::GetPDGains")))
+  {
+    mc_rtc::log::error("PD gains can't be changed, GetPDGains not found in datastore.");
+    return false;
+  }
+  if(!gainsUpdateRequired())
+  {
+    mc_rtc::log::info("PD gains are already up to date, no change needed.");
+    return true;
+  }
   std::string robot_name = robot().name();
   // Apply ratio to get actual gains
   Eigen::VectorXd actual_kp = pd_gains_ratio * p_vec;
   Eigen::VectorXd actual_kd = pd_gains_ratio * d_vec;
 
-  // Cache the gains we're setting
-  current_kp = actual_kp;
-  current_kd = actual_kd;
-
   // Update kp and kd use by the robot or simulator (Internal PD)
   const std::vector<double> proportionalGains_vec(actual_kp.data(), actual_kp.data() + actual_kp.size());
   const std::vector<double> dampingGains_vec(actual_kd.data(), actual_kd.data() + actual_kd.size());
-  return datastore().call<bool>(robot_name + "::SetPDGains", proportionalGains_vec, dampingGains_vec);
+
+  bool res = datastore().call<bool>(robot_name + "::SetPDGains", proportionalGains_vec, dampingGains_vec);
+  if(res)
+  {
+    mc_rtc::log::info("[RLController] New PD Gains have been successfully updated");
+    // Cache the gains we're setting
+    current_kp = actual_kp;
+    current_kd = actual_kd;
+  }
+  else
+  {
+    mc_rtc::log::error("Failed to set PD gains for {}", robot_name);
+  }
+  return res;
 }
 
-bool RLController::isCorrectGain(double tol)
+bool RLController::gainsUpdateRequired(double tol)
 {
   // Get current gains from robot and update cache
   std::tie(current_kp, current_kd) = getPDGains();
   // Check if the current gains are close to the target gains (with ratio)
   Eigen::VectorXd target_kp = pd_gains_ratio * kp_vector;
   Eigen::VectorXd target_kd = pd_gains_ratio * kd_vector;
-  bool changeGain = ((current_kp - target_kp).norm() >= tol) || ((current_kd - target_kd).norm() >= tol);
-  mc_rtc::log::info("[RLController] current_kp: {}", current_kp.transpose());
-  mc_rtc::log::info("[RLController] current_kd: {}", current_kd.transpose());
-  mc_rtc::log::info("[RLController] target_kp (ratio {}): {}", pd_gains_ratio, target_kp.transpose());
-  mc_rtc::log::info("[RLController] target_kd (ratio {}): {}", pd_gains_ratio, target_kd.transpose());
-  mc_rtc::log::info("[RLController] gains correction needed: {}", changeGain);
-  return changeGain;
+  bool gainCorrectionRequired = ((current_kp - target_kp).norm() >= tol) || ((current_kd - target_kd).norm() >= tol);
+  if(gainCorrectionRequired)
+  {
+    mc_rtc::log::info("[RLController] gains correction needed: {}", gainCorrectionRequired);
+    mc_rtc::log::info("[RLController] current_kp: {}", current_kp.transpose());
+    mc_rtc::log::info("[RLController] current_kd: {}", current_kd.transpose());
+    mc_rtc::log::info("[RLController] target_kp (ratio {}): {}", pd_gains_ratio, target_kp.transpose());
+    mc_rtc::log::info("[RLController] target_kd (ratio {}): {}", pd_gains_ratio, target_kd.transpose());
+  }
+  return gainCorrectionRequired;
 }
 
 void RLController::initializeState()
 {
-  if(isTorqueControl) datastore().get<std::string>("ControlMode") = "Torque";
-  else datastore().get<std::string>("ControlMode") = "Position";
-
-  if (!datastore().call<bool>("EF_Estimator::isActive")) {
-    datastore().call("EF_Estimator::toggleActive");
-  }
-
-  // Set low gains for RL if necesssary
-  if((datastore().has(robot().name() + "::GetPDGains") && isCorrectGain()))
-    setPDGains(kp_vector, kd_vector);
-  else
-    mc_rtc::log::warning("Will not change PD gains, SetPDGains not found in datastore OR no change needed");
+  // Update PD gains if necessary
+  setPDGains(kp_vector, kd_vector);
   tasksComputation(q_rl);
 }
 
@@ -818,22 +832,21 @@ std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(c
   sva::MotionVecd v_foot_l = anchorRobot.bodyVelW("left_ankle_link");
 
   auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-  // double tau_ext_knee_r = extTorqueSensor.torques()[robot().jointIndexByName("right_knee_joint")];
-  // double tau_ext_knee_l = extTorqueSensor.torques()[robot().jointIndexByName("left_knee_joint")];
-  double tau_ext_knee_r =  abs(extTorqueSensor.torques()[8+6]);
-  double tau_ext_knee_l =  abs(extTorqueSensor.torques()[3+6]);
-  if(tau_ext_knee_r + tau_ext_knee_l < 1e-6)
-  {
-    tau_ext_knee_l = 1;
-    tau_ext_knee_r = 1;
-  }
+  int right_knee_index = robot().jointIndexByName("right_knee_joint") + 5;
+  int left_knee_index = robot().jointIndexByName("left_knee_joint") + 5;
+  double tau_ext_knee_r =  abs(extTorqueSensor.torques()[right_knee_index]);
+  double tau_ext_knee_l =  abs(extTorqueSensor.torques()[left_knee_index]);
   double leftFootRatio = tau_ext_knee_l/(tau_ext_knee_r+tau_ext_knee_l);
-                              
-  Eigen::VectorXd w_r = X_foot_r.translation();//* tau_ext_knee_r/(tau_ext_knee_r+tau_ext_knee_l);
-  Eigen::VectorXd w_l = X_foot_l.translation(); //* tau_ext_knee_l/(tau_ext_knee_r+tau_ext_knee_l);
+  if(tau_ext_knee_r + tau_ext_knee_l < 0.02)
+  {
+    leftFootRatio = 0.5;
+  }
+         
+  Eigen::VectorXd w_r = X_foot_r.translation();
+  Eigen::VectorXd w_l = X_foot_l.translation();
   Eigen::VectorXd contact_anchor = (w_r * (1 - leftFootRatio) + w_l * leftFootRatio)  ;
   Eigen::VectorXd anchor_vel = (v_foot_r.linear() * (1 - leftFootRatio) + v_foot_l.linear() * leftFootRatio);
-  sva::PTransformd contact_anchor_tf(Eigen::Matrix3d::Identity(), contact_anchor); 
+  contact_anchor_tf = sva::PTransformd(Eigen::Matrix3d::Identity(), contact_anchor); 
 
   return {contact_anchor_tf, anchor_vel};
 }
