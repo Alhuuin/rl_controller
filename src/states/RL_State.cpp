@@ -8,12 +8,13 @@ void RL_State::configure(const mc_rtc::Configuration & config)
 void RL_State::start(mc_control::fsm::Controller & ctl_)
 {
   auto & ctl = static_cast<RLController&>(ctl_);
+  if(!ctl.datastore().has("EF_Estimator::isActive"))
+    mc_rtc::log::error_and_throw("[RL_State] EF_Estimator not found in datastore. Please enable ExternalForcesEstimator plugin");
   if (!ctl.datastore().call<bool>("EF_Estimator::isActive")) {
     ctl.datastore().call("EF_Estimator::toggleActive");
   }
   ctl.utils_.start_rl_state(ctl, "RL_State");
   ctl.initializeState();
-  ctl.datastore().get<std::string>("ControlMode") = "Torque";
   ctl.torqueTask->target(ctl.torque_target);
   ctl.solver().addTask(ctl.torqueTask);
   mc_rtc::log::info("RLState started");
