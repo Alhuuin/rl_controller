@@ -53,10 +53,12 @@ bool RLController::run()
   }
   
   counter += timeStep;
-  leftAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("left_ankle_link")].translation();
-  rightAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("right_ankle_link")].translation();
-  ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
-
+  if(robotName == "H1")
+  {
+    leftAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("left_ankle_link")].translation();
+    rightAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("right_ankle_link")].translation();
+    ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+  }
   auto & real_robot = realRobot(robots()[0].name());
 
   auto qIn = real_robot.mbc().q;
@@ -64,9 +66,11 @@ bool RLController::run()
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
   Eigen::MatrixXd Kp_inv = (pd_gains_ratio * kp_vector).cwiseInverse().asDiagonal();
-  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-  auto tau_ext = extTorqueSensor.torques();
-
+  if (robotName == "H1")
+  {
+    auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+    auto tau_ext = extTorqueSensor.torques();
+  }
   bool run = mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
   robot().forwardKinematics();
   robot().forwardVelocity();
@@ -289,13 +293,18 @@ void RLController::computeInversePD()
   Eigen::MatrixXd M_w_floatingBase = fd.H();
   Eigen::VectorXd Cg_w_floatingBase = fd.C();
 
-  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-  Eigen::VectorXd tau_cmd_w_floatingBase = M_w_floatingBase*ddot_qp_w_floatingBase + Cg_w_floatingBase - extTorqueSensor.torques();
+  Eigen::VectorXd extTorques = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  if (robotName == "H1")
+  {
+    auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+    extTorques = extTorqueSensor.torques();
+  }
+  Eigen::VectorXd tau_cmd_w_floatingBase = M_w_floatingBase*ddot_qp_w_floatingBase + Cg_w_floatingBase - extTorques;
   tau_cmd = tau_cmd_w_floatingBase.tail(dofNumber);
 
   Eigen::VectorXd tau_rl_w_floating_base = Eigen::VectorXd::Zero(robot().mb().nrDof());
   tau_rl_w_floating_base.tail(dofNumber) = tau_rl;
-  qddot_rl_simulatedMeasure = M_w_floatingBase.llt().solve(tau_rl_w_floating_base + extTorqueSensor.torques() - Cg_w_floatingBase).tail(dofNumber);
+  qddot_rl_simulatedMeasure = M_w_floatingBase.llt().solve(tau_rl_w_floating_base + extTorques - Cg_w_floatingBase).tail(dofNumber);
   qdot_rl_simulatedMeasure = currentVel + qddot_rl_simulatedMeasure*timeStep;
   q_rl_simulatedMeasure += qdot_rl_simulatedMeasure*timeStep;
 
@@ -313,11 +322,16 @@ void RLController::computeRLStateSimulated()
   Eigen::MatrixXd M_w_floatingBase = fd.H();
   Eigen::VectorXd Cg_w_floatingBase = fd.C();
 
-  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+  Eigen::VectorXd extTorques = Eigen::VectorXd::Zero(robot().mb().nrDof());
+  if (robotName == "H1")
+  {
+    auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+    extTorques = extTorqueSensor.torques();
+  }
   tau_rl = (pd_gains_ratio * kp_vector).cwiseProduct(q_rl - currentPos) - (pd_gains_ratio * kd_vector).cwiseProduct(currentVel);
   Eigen::VectorXd tau_rl_w_floating_base = Eigen::VectorXd::Zero(robot().mb().nrDof());
   tau_rl_w_floating_base.tail(dofNumber) = tau_rl;
-  Eigen::VectorXd content = tau_rl_w_floating_base + extTorqueSensor.torques() - Cg_w_floatingBase; // Add the external torques to the desired torques
+  Eigen::VectorXd content = tau_rl_w_floating_base + extTorques - Cg_w_floatingBase; // Add the external torques to the desired torques
 
   qddot_rl_simulatedMeasure = M_w_floatingBase.llt().solve(content).tail(dofNumber);
   qdot_rl_simulatedMeasure = currentVel + qddot_rl_simulatedMeasure*timeStep;
@@ -522,10 +536,12 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
 
   auto & real_robot = realRobot(robots()[0].name());
 
-  leftAnklePos = real_robot.collisionTransform("left_ankle_link").translation();
-  rightAnklePos = real_robot.collisionTransform("right_ankle_link").translation();
-  ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
-
+  if(robotName == "H1")
+  {
+    leftAnklePos = real_robot.collisionTransform("left_ankle_link").translation();
+    rightAnklePos = real_robot.collisionTransform("right_ankle_link").translation();
+    ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+  }
   jointLimitsHardPos_upper = Eigen::VectorXd::Zero(dofNumber);
   jointLimitsHardPos_lower = Eigen::VectorXd::Zero(dofNumber);
   jointLimitsHardVel_upper = Eigen::VectorXd::Zero(dofNumber);
@@ -610,7 +626,7 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   current_kp = kp_vector;
   current_kd = kd_vector;
   solver().removeTask(FSMPostureTask);
-  if(!datastore().has("anchorFrameFunction"))
+  if(!datastore().has("anchorFrameFunction") && robotName == "H1")
   {
     datastore().make_call("anchorFrameFunction", [this](const mc_rbdyn::Robot & real_robot) {return createContactAnchor(real_robot);});
   }
@@ -644,9 +660,17 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
 void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
 {
   auto & real_robot = realRobot(robots()[0].name());
+  
+  std::string baseName;
+  if(robotName == "H1")
+    baseName = "pelvis";
+  else if(robotName == "Go2")
+    baseName = "base";
+  else
+    baseName = "root";
 
-  baseAngVel = real_robot.bodyVelW("pelvis").angular();
-  Eigen::Matrix3d baseRot = real_robot.bodyPosW("pelvis").rotation();
+  baseAngVel = real_robot.bodyVelW(baseName).angular();
+  Eigen::Matrix3d baseRot = real_robot.bodyPosW(baseName).rotation();
   rpy = mc_rbdyn::rpyFromMat(baseRot);
     
   mc_rtc::log::info("[RLController] Posture target initialized with {} joints", dofNumber); 

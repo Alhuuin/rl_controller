@@ -408,6 +408,7 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
         }
       }
       obs.segment(36, 12) = ctl.legAction;
+      break;
     }
     default:
     {
