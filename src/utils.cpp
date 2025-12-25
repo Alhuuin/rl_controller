@@ -347,6 +347,68 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
       obs.segment(107, 3) = ctl.velCmdRL_;
       break;
     }
+    case 3:
+    {
+      ctl.baseLinVel = imu.linearVelocity();
+      obs(0) = ctl.baseLinVel.x();
+      obs(1) = ctl.baseLinVel.y();
+      obs(2) = ctl.baseLinVel.z();
+
+      ctl.baseAngVel = imu.angularVelocity();
+      obs(3) = ctl.baseAngVel.x();
+      obs(4) = ctl.baseAngVel.y();
+      obs(5) = ctl.baseAngVel.z();
+
+      Eigen::Vector3d gravity(0, 0, -9.81);
+      Eigen::Quaterniond q_imu_to_world = imu.orientation();
+      auto qInRL = real_robot.mbc().q;
+      Eigen::VectorXd floatingBase_qInRL = rbd::paramToVector(real_robot.mb(), qInRL);
+      // // Suppose you have the IMU orientation (rotation from IMU to world)
+      Eigen::VectorXd q_imu_vector = floatingBase_qInRL.segment(0, 4);
+      q_imu_to_world.w() = q_imu_vector(0);
+      q_imu_to_world.x() = q_imu_vector(1);
+      q_imu_to_world.y() = q_imu_vector(2);
+      q_imu_to_world.z() = q_imu_vector(3);
+      Eigen::Matrix3d R_world_to_imu = q_imu_to_world.toRotationMatrix();
+      Eigen::Vector3d gravity_b = R_world_to_imu.transpose() * gravity;
+      Eigen::Vector3d gravity_b_dir = gravity_b.normalized();
+      ctl.projected_gravity = gravity_b_dir;
+      obs(6) = ctl.projected_gravity.x(); // base linear acc
+      obs(7) = ctl.projected_gravity.y();
+      obs(8) = ctl.projected_gravity.z();
+
+      obs.segment(9, 3) = ctl.velCmdRL_;
+
+
+      Eigen::VectorXd reorderedPos = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentPos, ctl.dofNumber);
+      Eigen::VectorXd reorderedVel = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentVel, ctl.dofNumber);
+      for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
+      {
+        int idx = ctl.usedJoints_simuOrder[i];
+        if(idx >= reorderedPos.size()) {
+          mc_rtc::log::error("Leg joint index {} out of bounds for reordered size {}", idx, reorderedPos.size());
+          ctl.legPos(i) = 0.0;
+          ctl.legVel(i) = 0.0;
+        } else {
+          ctl.legPos(i) = reorderedPos(idx);
+          ctl.legVel(i) = reorderedVel(idx);
+        }
+      }
+      obs.segment(12, 12) = ctl.legPos;
+      obs.segment(24, 12) = ctl.legVel;
+
+      for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
+      {
+        int idx = ctl.usedJoints_simuOrder[i];
+        if(idx >= ctl.a_simuOrder.size()) {
+          mc_rtc::log::error("Past action index {} out of bounds for size {}", idx, ctl.a_simuOrder.size());
+          ctl.legAction(i) = 0.0;
+        } else {
+          ctl.legAction(i) = ctl.a_simuOrder(idx);
+        }
+      }
+      obs.segment(36, 12) = ctl.legAction;
+    }
     default:
     {
       mc_rtc::log::error("Unknown policy index: {}", ctl.currentPolicyIndex);
