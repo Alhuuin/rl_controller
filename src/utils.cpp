@@ -349,12 +349,14 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
     }
     case 3:
     {
-      ctl.baseLinVel = imu.linearVelocity();
+      // Get velocity from robot body instead of IMU sensor (which is not populated in loopback mode)
+      const auto & floatingBaseBody = robot.mb().body(0).name();
+      ctl.baseLinVel = robot.bodyVelW(floatingBaseBody).linear();
       obs(0) = ctl.baseLinVel.x();
       obs(1) = ctl.baseLinVel.y();
       obs(2) = ctl.baseLinVel.z();
 
-      ctl.baseAngVel = imu.angularVelocity();
+      ctl.baseAngVel = robot.bodyVelW(floatingBaseBody).angular();
       obs(3) = ctl.baseAngVel.x();
       obs(4) = ctl.baseAngVel.y();
       obs(5) = ctl.baseAngVel.z();
@@ -453,8 +455,8 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
     
     // Update lastActions_
     ctl.a_before_vector = ctl.a_vector;
-    // Run new inference and update target position
-    ctl.a_vector = ctl.policySimulatorHandling_->reorderJointsFromSimulator(fullAction, ctl.dofNumber);
+    // Run new inference and update target position, scaled by action scale
+    ctl.a_vector = ctl.policySimulatorHandling_->reorderJointsFromSimulator(fullAction, ctl.dofNumber) * 0.5; // TODO: add action scale
     ctl.q_rl = ctl.q_zero_vector + ctl.a_vector;
 
     // For not controlled joints, use the zero position
