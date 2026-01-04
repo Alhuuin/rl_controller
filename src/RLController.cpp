@@ -17,8 +17,108 @@
 #include <vector>
 
 
+mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & config)
+{
+  mc_rtc::Configuration modifiedConfig = config;
+  
+  // Check MainRobot from global or controller config
+  std::string mainRobot = config("MainRobot", std::string(""));
+  mc_rtc::log::info("[RLController] MainRobot detected: '{}'", mainRobot);
+  
+  // Add ExternalForcesEstimator plugin for H1
+  if(mainRobot == "H1")
+  {
+    // Remove BodySensor observer if H1, keeping Tilt
+    configureObservers("BodySensor", modifiedConfig);
+
+    bool hasPlugin = false;
+    if(modifiedConfig.has("Plugins"))
+    {
+      auto plugins = modifiedConfig("Plugins");
+      // Check if ExternalForcesEstimator is already in the list
+      for(size_t i = 0; i < plugins.size(); ++i)
+      {
+        std::string pluginName = plugins[i];
+        if(pluginName == "ExternalForcesEstimator")
+        {
+          hasPlugin = true;
+          break;
+        }
+      }
+      
+      if(!hasPlugin)
+      {
+        // Build new plugins list with ExternalForcesEstimator added
+        std::vector<std::string> pluginJsons;
+        for(size_t i = 0; i < plugins.size(); ++i)
+        {
+          pluginJsons.push_back("\"" + static_cast<std::string>(plugins[i]) + "\"");
+        }
+        pluginJsons.push_back("\"ExternalForcesEstimator\"");
+        
+        std::string arrayJson = "[" + std::accumulate(pluginJsons.begin(), pluginJsons.end(), std::string(),
+          [](const std::string& a, const std::string& b) -> std::string {
+            return a.empty() ? b : a + "," + b;
+          }) + "]";
+        mc_rtc::Configuration newPlugins;
+        newPlugins.loadData(arrayJson);
+        modifiedConfig.add("Plugins", newPlugins);
+        mc_rtc::log::info("[RLController] Added ExternalForcesEstimator to existing plugins for H1");
+      }
+    }
+    else
+    {
+      // No plugins exist, create new list
+      mc_rtc::Configuration plugins;
+      plugins.loadData("[\"ExternalForcesEstimator\"]");
+      modifiedConfig.add("Plugins", plugins);
+      mc_rtc::log::info("[RLController] Added ExternalForcesEstimator plugin for H1");
+    }
+  }
+  else
+  {
+    // Remove Tilt observer if not H1, keeping BodySensor
+    configureObservers("Tilt", modifiedConfig);
+  }
+  
+  return modifiedConfig;
+}
+
+void RLController::configureObservers(const std::string &observerName, mc_rtc::Configuration & modifiedConfig)
+{
+  if(!modifiedConfig.has("ObserverPipelines")) return;
+  auto observerPipeline = modifiedConfig("ObserverPipelines");
+  if(!observerPipeline.has("observers")) return;
+  
+  auto observers = observerPipeline("observers");
+  // Build JSON string for filtered observers
+  std::vector<std::string> observerJsons;
+  observerJsons.reserve(observers.size());
+  
+  for(size_t i = 0; i < observers.size(); ++i)
+  {
+    auto obs = observers[i];
+    if(obs.has("type"))
+    {
+      std::string obsType = obs("type");
+      if(obsType != observerName)
+      {
+        observerJsons.push_back(obs.dump(false, false));
+      }
+    }
+  }
+  
+  std::string arrayJson = "[" + std::accumulate(observerJsons.begin(), observerJsons.end(), std::string(),
+    [](const std::string& a, const std::string& b) -> std::string {
+      return a.empty() ? b : a + "," + b;
+    }) + "]";
+  mc_rtc::Configuration newObservers;
+  newObservers.loadData(arrayJson);
+  modifiedConfig("ObserverPipelines").add("observers", newObservers);
+}
+
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config)
-: mc_control::fsm::Controller(rm, dt, config, Backend::TVM)
+: mc_control::fsm::Controller(rm, dt, adjustConfig(config), Backend::TVM)
 {
   currentPolicyIndex = config("default_policy_index", 0);
   loadConfig(config);

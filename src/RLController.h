@@ -17,13 +17,11 @@
 #include <chrono>
 #include <vector>
 
-
-#define TORQUE_TASK 0
-#define FD_TASK 1
-#define PURE_RL 2
-
 struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 {
+  mc_rtc::Configuration adjustConfig(const mc_rtc::Configuration & config);
+  void configureObservers(const std::string &observerName, mc_rtc::Configuration & modifiedConfig);
+
   RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config);
 
   bool run() override;

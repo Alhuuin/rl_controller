@@ -17,8 +17,6 @@ StatesFiles:
 # If true, state factory will be more verbose
 VerboseStateFactory: false
 
-#Plugins: [ExternalForcesEstimator]
-
 # Robot and environment setup
 robots:
   ground:
@@ -38,23 +36,24 @@ ObserverPipelines:
     - type: Encoder
       config:
           velocity: encoderVelocities
-
-    # - type: Tilt
-    #   required: true
-    #   update: true
-    #   config:
-    #     anchorFrameFunction: anchorFrameFunction
-    #     filterGains:
-    #       initAlpha: 2 # 5 # 0.0
-    #       initBeta: 2 # 1 # 0.0 # 0.00001
-    #       initGamma: 1 # 2 # 0.0
-    #       finalAlpha: 2 # 5 # 0.0
-    #       finalBeta: 2 # 1 # 0.0 # 0.00001
-    #       finalGamma: 1 # 2 # 0.0
-    - type: BodySensor                     # - Use a BodySensor observer
-      update: false                        #   Do not update the real robot state
-      gui: false                           #   Do not display in the gui
-      config:                              #
+    # Will only be used if H1
+    - type: Tilt
+      required: true
+      update: true
+      config:
+        anchorFrameFunction: anchorFrameFunction
+        filterGains:
+          initAlpha: 2
+          initBeta: 2
+          initGamma: 1
+          finalAlpha: 2
+          finalBeta: 2
+          finalGamma: 1
+    # Will only be used if not H1
+    - type: BodySensor
+      update: true
+      gui: true
+      config:
         bodySensor: FloatingBase
 
 # Transition from initial state to RL execution
