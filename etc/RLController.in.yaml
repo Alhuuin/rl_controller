@@ -104,7 +104,7 @@ Robot:
 
 
 policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx", "go2.onnx"]  # Path to the RL policy file(s)
-default_policy_index: 3 # Index of the default policy to use
+default_policy_index: 2 # Index of the default policy to use
 policies:
   # index 0 : standing_policy
   - robot_name: "H1"
@@ -283,6 +283,8 @@ policies:
         RL_thigh_joint: 0.5
         RL_calf_joint: 0.5
     speed_multiplier_joystick: 0.4
+    action_scale: 0.5
+    policy_period_ms: 25.0
 
 use_async_inference: false
 

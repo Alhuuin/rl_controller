@@ -35,7 +35,6 @@ struct utils
         double startTime_ = 0.0;
         double syncTime_;
         double syncPhase_ = 0.0;
-        static constexpr double INFERENCE_PERIOD_MS = 25.0;  // 40Hz = 25ms period
         std::atomic<bool> shouldStopInference_ = false;
         std::atomic<bool> newObservationAvailable_ = false;
         std::atomic<bool> newActionAvailable_ = false;

@@ -871,6 +871,9 @@ void RLController::configRL(const mc_rtc::Configuration & config)
   }
   maxVelCmd = config("policies")[currentPolicyIndex]("speed_multiplier_joystick", 0.6);
   maxYawCmd = config("policies")[currentPolicyIndex]("max_yaw_joystick", 0.7);
+
+  actionScale = config("policies")[currentPolicyIndex]("action_scale", 1.0);
+  policyPeriodMs = config("policies")[currentPolicyIndex]("policy_period_ms", 20.0);
 }
 
 std::tuple<Eigen::VectorXd, Eigen::VectorXd> RLController::getPDGains()

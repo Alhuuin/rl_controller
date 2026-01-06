@@ -13,7 +13,7 @@ void utils::start_rl_state(mc_control::fsm::Controller & ctl_, std::string state
   action = Eigen::VectorXd::Zero(ctl.rlPolicy_->getActionSize());
 
   stepCount_ = 0;
-  syncTime_ = INFERENCE_PERIOD_MS / 1000;
+  syncTime_ = ctl.policyPeriodMs / 1000;
   startTime_ = std::chrono::duration<double>(
     std::chrono::high_resolution_clock::now().time_since_epoch()).count();
     
@@ -77,7 +77,7 @@ void utils::run_rl_state(mc_control::fsm::Controller & ctl_, std::string state_n
       syncTime_ += ctl.timeStep;
       syncPhase_ += ctl.timeStep;
       ctl.phase_ = fmod(syncPhase_ * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
-      if(syncTime_ >= INFERENCE_PERIOD_MS/1000)
+      if(syncTime_ >= ctl.policyPeriodMs/1000)
       {
         // syncTime_ -=ctl.timeStep;
         // // mc_rtc::log::info("FREQ: {:.1f} Hz", 1.0 / (syncTime_));
@@ -456,7 +456,7 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
     // Update lastActions_
     ctl.a_before_vector = ctl.a_vector;
     // Run new inference and update target position, scaled by action scale
-    ctl.a_vector = ctl.policySimulatorHandling_->reorderJointsFromSimulator(fullAction, ctl.dofNumber) * 0.5; // TODO: add action scale
+    ctl.a_vector = ctl.policySimulatorHandling_->reorderJointsFromSimulator(fullAction, ctl.dofNumber) * ctl.actionScale; // TODO: add action scale
     ctl.q_rl = ctl.q_zero_vector + ctl.a_vector;
 
     // For not controlled joints, use the zero position
@@ -550,7 +550,7 @@ void utils::inferenceThreadFunction(mc_control::fsm::Controller & ctl_)
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastInference = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastInferenceTime_);
       // auto startTime = std::chrono::high_resolution_clock::now();
-      shouldRunInference_ = timeSinceLastInference.count() >= INFERENCE_PERIOD_MS;
+      shouldRunInference_ = timeSinceLastInference.count() >= ctl.policyPeriodMs;
 
       newActionAvailable_ = shouldRunInference_;
 

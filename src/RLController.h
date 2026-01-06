@@ -59,6 +59,8 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   bool useQP = true;
   bool isTorqueControl = false;
   double pd_gains_ratio = 1.0;
+  double actionScale;
+  double policyPeriodMs;
 
   // Robot specific data
   std::string robotName;
