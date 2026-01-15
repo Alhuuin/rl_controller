@@ -136,6 +136,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::VectorXd legPos_prev_prev, legVel_prev_prev, legAction_prev_prev; // Leg position, velocity and action in mc_rtc order
 
   Eigen::Vector3d baseLinVel; // Linear velocity of the base
+  Eigen::Vector3d projected_gravity;
 
   Eigen::Vector3d velCmdRL_;                        // Command vector [vx, vy, yaw_rate]
   double phase_;                               // Current phase for periodic gait
@@ -198,6 +199,4 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   double maxVelCmd;
   double maxYawCmd;
   sva::PTransformd contact_anchor_tf;
-
-  Eigen::Vector3d projected_gravity;
 };

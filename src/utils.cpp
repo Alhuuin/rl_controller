@@ -349,6 +349,85 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
     }
     case 3:
     {
+      Eigen::Vector3d gravity(0, 0, -9.81);
+      Eigen::Quaterniond q_imu_to_world = imu.orientation();
+      auto qInRL = real_robot.mbc().q;
+      Eigen::VectorXd floatingBase_qInRL = rbd::paramToVector(real_robot.mb(), qInRL);
+      // // Suppose you have the IMU orientation (rotation from IMU to world)
+      Eigen::VectorXd q_imu_vector = floatingBase_qInRL.segment(0, 4);
+      q_imu_to_world.w() = q_imu_vector(0);
+      q_imu_to_world.x() = q_imu_vector(1);
+      q_imu_to_world.y() = q_imu_vector(2);
+      q_imu_to_world.z() = q_imu_vector(3);
+
+      // Convert to rotation matrix (world to IMU)
+      Eigen::Matrix3d R_world_to_imu = q_imu_to_world.toRotationMatrix();
+      Eigen::Vector3d gravity_b = R_world_to_imu.transpose() * gravity;
+      Eigen::Vector3d gravity_b_dir = gravity_b.normalized();
+      ctl.projected_gravity = gravity_b_dir;
+      auto alphaInRL = real_robot.mbc().alpha;
+      Eigen::VectorXd floatingBase_alphaInRL = rbd::dofToVector(real_robot.mb(), alphaInRL);
+      ctl.baseAngVel = floatingBase_alphaInRL.segment(0, 3);
+      ctl.baseLinVel = floatingBase_alphaInRL.segment(3, 3);
+      
+      //ctl.projected_gravity = imu.
+      obs(0) = ctl.baseLinVel.x(); // base linear vel
+      obs(1) = ctl.baseLinVel.y();
+      obs(2) = ctl.baseLinVel.z();
+      
+      obs(3) = ctl.baseAngVel.x(); //base angular vel
+      obs(4) = ctl.baseAngVel.y();
+      obs(5) = ctl.baseAngVel.z();
+      obs(6) = ctl.projected_gravity.x(); // base linear acc
+      obs(7) = ctl.projected_gravity.y();
+      obs(8) = ctl.projected_gravity.z();
+
+      // Command (3 elements) - [vx, vy, yaw_rate]
+      ctl.velCmdRL_ = Eigen::Vector3d(0.5,0.5,0.5);
+      obs.segment(9, 3) = ctl.velCmdRL_;
+
+      Eigen::VectorXd reorderedPos = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentPos, ctl.dofNumber);
+      Eigen::VectorXd reorderedVel = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentVel, ctl.dofNumber);
+
+      ctl.legPos_prev_prev = ctl.legPos_prev;
+      ctl.legPos_prev = ctl.legPos;
+      ctl.legVel_prev_prev = ctl.legVel_prev;
+      ctl.legVel_prev = ctl.legVel;
+      ctl.legAction_prev_prev = ctl.legAction_prev;
+      ctl.legAction_prev = ctl.legAction;
+
+      for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
+      {
+        int idx = ctl.usedJoints_simuOrder[i];
+        if(idx >= reorderedPos.size()) {
+          mc_rtc::log::error("Leg joint index {} out of bounds for reordered size {}", idx, reorderedPos.size());
+          ctl.legPos(i) = 0.0;
+          ctl.legVel(i) = 0.0;
+        } else {
+          ctl.legPos(i) = reorderedPos(idx);
+          ctl.legVel(i) = reorderedVel(idx);
+        }
+      }
+
+      obs.segment(12, 11) = ctl.legPos;
+      obs.segment(23, 11) = ctl.legVel;
+
+      // past action: reorder to Simulator format and extract leg joints
+      for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
+      {
+        int idx = ctl.usedJoints_simuOrder[i];
+        if(idx >= ctl.a_simuOrder.size()) {
+          mc_rtc::log::error("Past action index {} out of bounds for size {}", idx, ctl.a_simuOrder.size());
+          ctl.legAction(i) = 0.0;
+        } else {
+          ctl.legAction(i) = ctl.a_simuOrder(idx);
+        }
+      }
+      obs.segment(34, 11) = ctl.legAction;
+      break;
+    }
+    case 4:
+    {
       // Get velocity from robot body instead of IMU sensor (which is not populated in loopback mode)
       const auto & floatingBaseBody = robot.mb().body(0).name();
       ctl.baseLinVel = robot.bodyVelW(floatingBaseBody).linear();
