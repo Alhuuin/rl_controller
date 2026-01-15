@@ -7,6 +7,8 @@ set(PROJECT_NAME RLController)
 set(PROJECT_DESCRIPTION "RL Policy FSM Controller for H1 Robot")
 set(PROJECT_URL "")
 
+include(cmake/base.cmake)
+
 add_compile_definitions(
   PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
