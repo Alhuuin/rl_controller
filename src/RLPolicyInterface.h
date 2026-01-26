@@ -5,7 +5,7 @@
 #include <memory>
 
 // #include <onnxruntime_cxx_api.h>
-#include "onnxruntime/include/onnxruntime_cxx_api.h"
+#include "onnxruntime_cxx_api.h"
 
 /**
  * @brief Interface for RL policy inference

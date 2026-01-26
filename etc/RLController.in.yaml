@@ -36,309 +36,307 @@ ObserverPipelines:
     - type: Encoder
       config:
           velocity: encoderVelocities
-
-    # - type: Attitude
-    #   required: true
-    #   update: false
-
-    # - type: BodySensor
-    #   update: false
-    #   # config:
-    #   #   bodySensor: FloatingBase
-
+    # Will only be used if H1
     - type: Tilt
       required: true
       update: true
       config:
         anchorFrameFunction: anchorFrameFunction
         filterGains:
-          initAlpha: 2 # 5 # 0.0
-          initBeta: 2 # 1 # 0.0 # 0.00001
-          initGamma: 1 # 2 # 0.0
-          finalAlpha: 2 # 5 # 0.0
-          finalBeta: 2 # 1 # 0.0 # 0.00001
-          finalGamma: 1 # 2 # 0.0
-
-
-    # - type: KinematicInertial
-    #   update: true
-    #   config:
-    #     imuBodySensor: Accelerometer
-
-
+          initAlpha: 2
+          initBeta: 2
+          initGamma: 1
+          finalAlpha: 2
+          finalBeta: 2
+          finalGamma: 1
+    # Will only be used if not H1
+    - type: BodySensor
+      update: true
+      gui: true
+      config:
+        bodySensor: FloatingBase
 
 # Transition from initial state to RL execution
 transitions:
 # configure the transitions between every states
-- [RL_QP_FDTask_Torque, OK, RL_QP_FDTask_Torque, Strict]
-- [RL_QP_FDTask_Torque, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [RL_QP_FDTask_Torque, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [RL_QP_FDTask_Torque, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [RL_QP_FDTask_Torque, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [RL_QP_FDTask_Torque, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [RL_QP_FDTask_Torque, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [RL_QP_FDTask_Torque, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [RL_QP_FDTask_Torque, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [RL_QP_FDTask_Torque, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
+- [RL_State, OK, RL_State, Strict]
 
-- [RL_QP_FDTask_Pos, OK, RL_QP_FDTask_Pos, Strict]
-- [RL_QP_FDTask_Pos, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [RL_QP_FDTask_Pos, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [RL_QP_FDTask_Pos, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [RL_QP_FDTask_Pos, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [RL_QP_FDTask_Pos, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [RL_QP_FDTask_Pos, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [RL_QP_FDTask_Pos, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [RL_QP_FDTask_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [RL_QP_FDTask_Pos, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
+init: RL_State
 
-- [RL_QP_TorqueTask_Torque, OK, RL_QP_TorqueTask_Torque, Strict]
-- [RL_QP_TorqueTask_Torque, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [RL_QP_TorqueTask_Torque, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [RL_QP_TorqueTask_Torque, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [RL_QP_TorqueTask_Torque, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [RL_QP_TorqueTask_Torque, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [RL_QP_TorqueTask_Torque, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [RL_QP_TorqueTask_Torque, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [RL_QP_TorqueTask_Torque, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [RL_QP_TorqueTask_Torque, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-
-- [RL_QP_TorqueTask_Pos, OK, RL_QP_TorqueTask_Pos, Strict]
-- [RL_QP_TorqueTask_Pos, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [RL_QP_TorqueTask_Pos, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [RL_QP_TorqueTask_Pos, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [RL_QP_TorqueTask_Pos, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [RL_QP_TorqueTask_Pos, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [RL_QP_TorqueTask_Pos, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [RL_QP_TorqueTask_Pos, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [RL_QP_TorqueTask_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [RL_QP_TorqueTask_Pos, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-
-- [PureRL_Torque, OK, PureRL_Torque, Strict]
-- [PureRL_Torque, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [PureRL_Torque, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [PureRL_Torque, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [PureRL_Torque, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [PureRL_Torque, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [PureRL_Torque, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [PureRL_Torque, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [PureRL_Torque, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [PureRL_Torque, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-
-- [PureRL_Pos, OK, PureRL_Pos, Strict]
-- [PureRL_Pos, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [PureRL_Pos, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [PureRL_Pos, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [PureRL_Pos, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [PureRL_Pos, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [PureRL_Pos, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [PureRL_Pos, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [PureRL_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [PureRL_Pos, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-
-- [Posture_FDTask_Torque, OK, Posture_FDTask_Torque, Strict]
-- [Posture_FDTask_Torque, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [Posture_FDTask_Torque, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [Posture_FDTask_Torque, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [Posture_FDTask_Torque, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [Posture_FDTask_Torque, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [Posture_FDTask_Torque, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [Posture_FDTask_Torque, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [Posture_FDTask_Torque, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [Posture_FDTask_Torque, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-
-- [Posture_FDTask_Pos, OK, Posture_FDTask_Pos, Strict]
-- [Posture_FDTask_Pos, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [Posture_FDTask_Pos, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [Posture_FDTask_Pos, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [Posture_FDTask_Pos, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [Posture_FDTask_Pos, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [Posture_FDTask_Pos, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [Posture_FDTask_Pos, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [Posture_FDTask_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-- [Posture_FDTask_Pos, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-
-- [Posture_TorqueTask_Torque, OK, Posture_TorqueTask_Torque, Strict]
-- [Posture_TorqueTask_Torque, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [Posture_TorqueTask_Torque, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [Posture_TorqueTask_Torque, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [Posture_TorqueTask_Torque, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [Posture_TorqueTask_Torque, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [Posture_TorqueTask_Torque, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [Posture_TorqueTask_Torque, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [Posture_TorqueTask_Torque, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [Posture_TorqueTask_Torque, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-
-- [Posture_TorqueTask_Pos, OK, Posture_TorqueTask_Pos, Strict]
-- [Posture_TorqueTask_Pos, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [Posture_TorqueTask_Pos, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [Posture_TorqueTask_Pos, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [Posture_TorqueTask_Pos, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [Posture_TorqueTask_Pos, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [Posture_TorqueTask_Pos, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [Posture_TorqueTask_Pos, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [Posture_TorqueTask_Pos, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [Posture_TorqueTask_Pos, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
-
-- [Posture_TorqueTask_Pos_Compliance, OK, Posture_TorqueTask_Pos_Compliance, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_Posture_TorqueTask_Pos, Posture_TorqueTask_Pos, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_RL_QP_FDTask_Torque, RL_QP_FDTask_Torque, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_RL_QP_FDTask_Pos, RL_QP_FDTask_Pos, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_RL_QP_TorqueTask_Torque, RL_QP_TorqueTask_Torque, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_RL_QP_TorqueTask_Pos, RL_QP_TorqueTask_Pos, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_PureRL_Torque, PureRL_Torque, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_PureRL_Pos, PureRL_Pos, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_Posture_FDTask_Torque, Posture_FDTask_Torque, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_Posture_FDTask_Pos, Posture_FDTask_Pos, Strict]
-- [Posture_TorqueTask_Pos_Compliance, transition_Posture_TorqueTask_Torque, Posture_TorqueTask_Torque, Strict]
+Robot:
+  H1:  
+    mc_rtc_joints_order: [
+      "left_hip_yaw_joint",      
+      "left_hip_roll_joint",       
+      "left_hip_pitch_joint",    
+      "left_knee_joint",         
+      "left_ankle_joint",        
+      "right_hip_yaw_joint",     
+      "right_hip_roll_joint",    
+      "right_hip_pitch_joint",   
+      "right_knee_joint",        
+      "right_ankle_joint",       
+      "torso_joint",             
+      "left_shoulder_pitch_joint",  
+      "left_shoulder_roll_joint",     
+      "left_shoulder_yaw_joint",    
+      "left_elbow_joint",           
+      "right_shoulder_pitch_joint", 
+      "right_shoulder_roll_joint",  
+      "right_shoulder_yaw_joint",   
+      "right_elbow_joint"           
+    ]
+  Go2:
+    mc_rtc_joints_order: [
+      "FR_hip_joint",
+      "FR_thigh_joint",
+      "FR_calf_joint",
+      "FL_hip_joint",
+      "FL_thigh_joint",
+      "FL_calf_joint",
+      "RR_hip_joint",
+      "RR_thigh_joint",
+      "RR_calf_joint",
+      "RL_hip_joint",
+      "RL_thigh_joint",
+      "RL_calf_joint"
+    ]
 
 
+policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx", "walking_lockstep_h1.onnx", "go2.onnx"]  # Path to the RL policy file(s)
+default_policy_index: 2 # Index of the default policy to use
+policies:
+  # index 0 : standing_policy
+  - robot_name: "H1"
+    is_torque_control: false
+    use_QP: true
+    simulator: "Maniskill"
+    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
+    pd_gains_ratio: 1.0
+    kp:
+        left_hip_yaw_joint: 100.0
+        left_hip_roll_joint: 100.0
+        left_hip_pitch_joint: 100.0
+        left_knee_joint: 100.0
+        left_ankle_joint: 20.0
+        right_hip_yaw_joint: 100.0
+        right_hip_roll_joint: 100.0
+        right_hip_pitch_joint: 100.0
+        right_knee_joint: 100.0
+        right_ankle_joint: 20.0
+        torso_joint: 100.0
+        left_shoulder_pitch_joint: 100.0
+        left_shoulder_roll_joint: 100.0
+        left_shoulder_yaw_joint: 100.0
+        left_elbow_joint: 100.0
+        right_shoulder_pitch_joint: 100.0
+        right_shoulder_roll_joint: 100.0
+        right_shoulder_yaw_joint: 100.0
+        right_elbow_joint: 100.0
+    kd:
+        left_hip_yaw_joint: 10.0
+        left_hip_roll_joint: 10.0
+        left_hip_pitch_joint: 10.0
+        left_knee_joint: 10.0
+        left_ankle_joint: 4.0
+        right_hip_yaw_joint: 10.0
+        right_hip_roll_joint: 10.0
+        right_hip_pitch_joint: 10.0
+        right_knee_joint: 10.0
+        right_ankle_joint: 4.0
+        torso_joint: 10.0
+        left_shoulder_pitch_joint: 5.0
+        left_shoulder_roll_joint: 5.0
+        left_shoulder_yaw_joint: 5.0
+        left_elbow_joint: 5.0
+        right_shoulder_pitch_joint: 5.0
+        right_shoulder_roll_joint: 5.0
+        right_shoulder_yaw_joint: 5.0
+        right_elbow_joint: 5.0
+  # index 1 : walking_policy
+  - robot_name: "H1"
+    is_torque_control: false
+    use_QP: true
+    simulator: "Maniskill"
+    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
+    pd_gains_ratio: 1.0
+    kp:
+        left_hip_yaw_joint: 100.0
+        left_hip_roll_joint: 100.0
+        left_hip_pitch_joint: 100.0
+        left_knee_joint: 100.0
+        left_ankle_joint: 20.0
+        right_hip_yaw_joint: 100.0
+        right_hip_roll_joint: 100.0
+        right_hip_pitch_joint: 100.0
+        right_knee_joint: 100.0
+        right_ankle_joint: 20.0
+        torso_joint: 100.0
+        left_shoulder_pitch_joint: 100.0
+        left_shoulder_roll_joint: 100.0
+        left_shoulder_yaw_joint: 100.0
+        left_elbow_joint: 100.0
+        right_shoulder_pitch_joint: 100.0
+        right_shoulder_roll_joint: 100.0
+        right_shoulder_yaw_joint: 100.0
+        right_elbow_joint: 100.0
+    kd:
+        left_hip_yaw_joint: 10.0
+        left_hip_roll_joint: 10.0
+        left_hip_pitch_joint: 10.0
+        left_knee_joint: 10.0
+        left_ankle_joint: 4.0
+        right_hip_yaw_joint: 10.0
+        right_hip_roll_joint: 10.0
+        right_hip_pitch_joint: 10.0
+        right_knee_joint: 10.0
+        right_ankle_joint: 4.0
+        torso_joint: 10.0
+        left_shoulder_pitch_joint: 5.0
+        left_shoulder_roll_joint: 5.0
+        left_shoulder_yaw_joint: 5.0
+        left_elbow_joint: 5.0
+        right_shoulder_pitch_joint: 5.0
+        right_shoulder_roll_joint: 5.0
+        right_shoulder_yaw_joint: 5.0
+        right_elbow_joint: 5.0
+    speed_multiplier_joystick: 0.4
+  # index 2 : better walking policy
+  - robot_name: "H1"
+    is_torque_control: false
+    use_QP: true
+    simulator: "Maniskill"
+    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
+    pd_gains_ratio: 0.9
+    kp:
+        left_hip_yaw_joint: 200.0
+        left_hip_roll_joint: 200.0
+        left_hip_pitch_joint: 200.0
+        left_knee_joint: 300.0
+        left_ankle_joint: 40.0
+        right_hip_yaw_joint: 200.0
+        right_hip_roll_joint: 200.0
+        right_hip_pitch_joint: 200.0
+        right_knee_joint: 300.0
+        right_ankle_joint: 40.0
+        torso_joint: 100.0
+        left_shoulder_pitch_joint: 100.0
+        left_shoulder_roll_joint: 100.0
+        left_shoulder_yaw_joint: 100.0
+        left_elbow_joint: 100.0
+        right_shoulder_pitch_joint: 100.0
+        right_shoulder_roll_joint: 100.0
+        right_shoulder_yaw_joint: 100.0
+        right_elbow_joint: 100.0
+    kd:
+        left_hip_yaw_joint: 5.0
+        left_hip_roll_joint: 5.0
+        left_hip_pitch_joint: 5.0
+        left_knee_joint: 6.0
+        left_ankle_joint: 2.0
+        right_hip_yaw_joint: 5.0
+        right_hip_roll_joint: 5.0
+        right_hip_pitch_joint: 5.0
+        right_knee_joint: 6.0
+        right_ankle_joint: 2.0
+        torso_joint: 10.0
+        left_shoulder_pitch_joint: 5.0
+        left_shoulder_roll_joint: 5.0
+        left_shoulder_yaw_joint: 5.0
+        left_elbow_joint: 5.0
+        right_shoulder_pitch_joint: 5.0
+        right_shoulder_roll_joint: 5.0
+        right_shoulder_yaw_joint: 5.0
+        right_elbow_joint: 5.0
+    speed_multiplier_joystick: 0.4
+  # index 3 : H1 lockstep walking policy
+  - robot_name: "H1"
+    is_torque_control: false
+    use_QP: true
+    simulator: "Maniskill"
+    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] #legs + torso
+    pd_gains_ratio: 1.0
+    kp:
+        left_hip_yaw_joint: 150.0
+        left_hip_roll_joint: 150.0
+        left_hip_pitch_joint: 200.0
+        left_knee_joint: 200.0
+        left_ankle_joint: 20.0
+        right_hip_yaw_joint: 150.0
+        right_hip_roll_joint: 150.0
+        right_hip_pitch_joint: 200.0
+        right_knee_joint: 200.0
+        right_ankle_joint: 20.0
+        torso_joint: 200.0
+        left_shoulder_pitch_joint: 40.0
+        left_shoulder_roll_joint: 40.0
+        left_shoulder_yaw_joint: 40.0
+        left_elbow_joint: 40.0
+        right_shoulder_pitch_joint: 40.0
+        right_shoulder_roll_joint: 40.0
+        right_shoulder_yaw_joint: 40.0
+        right_elbow_joint: 40.0
+    kd:
+        left_hip_yaw_joint: 5.0
+        left_hip_roll_joint: 5.0
+        left_hip_pitch_joint: 5.0
+        left_knee_joint: 5.0
+        left_ankle_joint: 4.0
+        right_hip_yaw_joint: 5.0
+        right_hip_roll_joint: 5.0
+        right_hip_pitch_joint: 5.0
+        right_knee_joint: 5.0
+        right_ankle_joint: 4.0
+        torso_joint: 5.0
+        left_shoulder_pitch_joint: 10.0
+        left_shoulder_roll_joint: 10.0
+        left_shoulder_yaw_joint: 10.0
+        left_elbow_joint: 10.0
+        right_shoulder_pitch_joint: 10.0
+        right_shoulder_roll_joint: 10.0
+        right_shoulder_yaw_joint: 10.0
+        right_elbow_joint: 10.0
+    speed_multiplier_joystick: 0.4
+    action_scale: 0.5
+    policy_period_ms: 25.0
+  # index 4 : Go2 walking policy
+  - robot_name: "Go2"
+    is_torque_control: false
+    use_QP: true
+    simulator: "IsaacLab"
+    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] #all
+    pd_gains_ratio: 1.0
+    kp:
+        FR_hip_joint : 25.0
+        FR_thigh_joint: 25.0
+        FR_calf_joint: 25.0
+        FL_hip_joint: 25.0
+        FL_thigh_joint: 25.0
+        FL_calf_joint: 25.0
+        RR_hip_joint: 25.0
+        RR_thigh_joint: 25.0
+        RR_calf_joint: 25.0
+        RL_hip_joint: 25.0
+        RL_thigh_joint: 25.0
+        RL_calf_joint: 25.0
+    kd:
+        FR_hip_joint : 0.5
+        FR_thigh_joint: 0.5
+        FR_calf_joint: 0.5
+        FL_hip_joint: 0.5
+        FL_thigh_joint: 0.5
+        FL_calf_joint: 0.5
+        RR_hip_joint: 0.5
+        RR_thigh_joint: 0.5
+        RR_calf_joint: 0.5
+        RL_hip_joint: 0.5
+        RL_thigh_joint: 0.5
+        RL_calf_joint: 0.5
+    speed_multiplier_joystick: 0.4
+    action_scale: 0.5
+    policy_period_ms: 25.0
 
-# init: Posture_TorqueTask_Pos_Compliance
-init: RL_QP_TorqueTask_Pos
-# init: RL_QP_FDTask_Pos
-# init: Posture_FDTask_Pos
-
-
-# RL Controller specific configuration
-# policy_path: "danger_walking.onnx" #"walking_policy.onnx"  # Your RL policy ONNX model path
-# policy_path: "walking_policy.onnx"
-policy_path: "perfect_walking.onnx"
-is_walking_policy: true
-is_perfect_policy: true
-# policy_path: "standing_policy.onnx"  # Your RL policy ONNX model path
-# is_walking_policy: false
-
-# use_async_inference: true   # Enable asynchronous RL inference for better real-time performance
-use_async_inference: false  # Synchronous with the controller frequency
+use_async_inference: false
 
 log_timing: true
 timing_log_interval: 100
-Simulator: "Maniskill"
-Used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
-
-high_kp:
-    left_hip_yaw_joint: 1500.0
-    left_hip_roll_joint: 1500.0
-    left_hip_pitch_joint: 1500.0
-    left_knee_joint: 1500.0
-    left_ankle_joint: 1500.0
-    right_hip_yaw_joint: 1500.0
-    right_hip_roll_joint: 1500.0
-    right_hip_pitch_joint: 1500.0
-    right_knee_joint: 1500.0
-    right_ankle_joint: 1500.0
-    torso_joint: 200.0
-    left_shoulder_pitch_joint: 200.0
-    left_shoulder_roll_joint: 100.0
-    left_shoulder_yaw_joint: 100.0
-    left_elbow_joint: 200.0
-    right_shoulder_pitch_joint: 200.0
-    right_shoulder_roll_joint: 100.0
-    right_shoulder_yaw_joint: 100.0
-    right_elbow_joint: 200.0
-
-high_kd:
-    left_hip_yaw_joint: 25.0
-    left_hip_roll_joint: 25.0
-    left_hip_pitch_joint: 25.0
-    left_knee_joint: 25.0
-    left_ankle_joint: 75.0
-    right_hip_yaw_joint: 25.0
-    right_hip_roll_joint: 25.0
-    right_hip_pitch_joint: 25.0
-    right_knee_joint: 25.0
-    right_ankle_joint: 75.0
-    torso_joint: 6.0
-    left_shoulder_pitch_joint: 2.0
-    left_shoulder_roll_joint: 2.0
-    left_shoulder_yaw_joint: 2.0
-    left_elbow_joint: 2.0
-    right_shoulder_pitch_joint: 2.0
-    right_shoulder_roll_joint: 2.0
-    right_shoulder_yaw_joint: 2.0
-    right_elbow_joint: 2.0
-
-kp:
-    left_hip_yaw_joint: 200.0
-    left_hip_roll_joint: 200.0
-    left_hip_pitch_joint: 200.0
-    left_knee_joint: 300.0
-    left_ankle_joint: 40.0
-    right_hip_yaw_joint: 200.0
-    right_hip_roll_joint: 200.0
-    right_hip_pitch_joint: 200.0
-    right_knee_joint: 300.0
-    right_ankle_joint: 40.0
-    torso_joint: 100.0
-    left_shoulder_pitch_joint: 100.0
-    left_shoulder_roll_joint: 100.0
-    left_shoulder_yaw_joint: 100.0
-    left_elbow_joint: 100.0
-    right_shoulder_pitch_joint: 100.0
-    right_shoulder_roll_joint: 100.0
-    right_shoulder_yaw_joint: 100.0
-    right_elbow_joint: 100.0
-
-kd:
-    left_hip_yaw_joint: 5.0
-    left_hip_roll_joint: 5.0
-    left_hip_pitch_joint: 5.0
-    left_knee_joint: 6.0
-    left_ankle_joint: 2.0
-    right_hip_yaw_joint: 5.0
-    right_hip_roll_joint: 5.0
-    right_hip_pitch_joint: 5.0
-    right_knee_joint: 6.0
-    right_ankle_joint: 2.0
-    torso_joint: 10.0
-    left_shoulder_pitch_joint: 5.0
-    left_shoulder_roll_joint: 5.0
-    left_shoulder_yaw_joint: 5.0
-    left_elbow_joint: 5.0
-    right_shoulder_pitch_joint: 5.0
-    right_shoulder_roll_joint: 5.0
-    right_shoulder_yaw_joint: 5.0
-    right_elbow_joint: 5.0
-
-# kp:
-#     left_hip_yaw_joint: 100.0
-#     left_hip_roll_joint: 100.0
-#     left_hip_pitch_joint: 100.0
-#     left_knee_joint: 100.0
-#     left_ankle_joint: 20.0
-#     right_hip_yaw_joint: 100.0
-#     right_hip_roll_joint: 100.0
-#     right_hip_pitch_joint: 100.0
-#     right_knee_joint: 100.0
-#     right_ankle_joint: 20.0
-#     torso_joint: 100.0
-#     left_shoulder_pitch_joint: 100.0
-#     left_shoulder_roll_joint: 100.0
-#     left_shoulder_yaw_joint: 100.0
-#     left_elbow_joint: 100.0
-#     right_shoulder_pitch_joint: 100.0
-#     right_shoulder_roll_joint: 100.0
-#     right_shoulder_yaw_joint: 100.0
-#     right_elbow_joint: 100.0
-
-# kd:
-#     left_hip_yaw_joint: 10.0
-#     left_hip_roll_joint: 10.0
-#     left_hip_pitch_joint: 10.0
-#     left_knee_joint: 10.0
-#     left_ankle_joint: 4.0
-#     right_hip_yaw_joint: 10.0
-#     right_hip_roll_joint: 10.0
-#     right_hip_pitch_joint: 10.0
-#     right_knee_joint: 10.0
-#     right_ankle_joint: 4.0
-#     torso_joint: 10.0
-#     left_shoulder_pitch_joint: 5.0
-#     left_shoulder_roll_joint: 5.0
-#     left_shoulder_yaw_joint: 5.0
-#     left_elbow_joint: 5.0
-#     right_shoulder_pitch_joint: 5.0
-#     right_shoulder_roll_joint: 5.0
-#     right_shoulder_yaw_joint: 5.0
-#     right_elbow_joint: 5.0

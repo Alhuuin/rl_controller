@@ -1,32 +1,16 @@
-# ---- ONNX Runtime local setup ----
+set(CONTROLLER_NAME RLController)
 
-# Absolute paths to your local ONNX Runtime
+# ---- ONNX Runtime (local vendored copy) ----
 set(ONNXRUNTIME_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime)
 set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
 set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
-# For build-time runs (ctest, running from build dir)
-set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
 
-# For after install
-set(CMAKE_INSTALL_RPATH "${ONNXRUNTIME_LIB_DIR}")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
-# Find *only* in the local lib dir, never system paths
 find_library(ONNXRUNTIME_LIB
   NAMES onnxruntime
   PATHS ${ONNXRUNTIME_LIB_DIR}
   NO_DEFAULT_PATH
   REQUIRED
 )
-
-if(NOT ONNXRUNTIME_LIB)
-  message(FATAL_ERROR "ONNX Runtime library not found in ${ONNXRUNTIME_LIB_DIR}")
-endif()
-
-message(STATUS "Using ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIR}")
-message(STATUS "Using ONNX Runtime lib: ${ONNXRUNTIME_LIB}")
-
-# ---- Sources ----
 
 set(SRC
   RLController.cpp
@@ -40,34 +24,36 @@ set(HDR
   RLPolicyInterface.h
   utils.h
   PolicySimulatorHandling.h
+  api.h
 )
-
-# ---- Main controller library ----
-
-add_library(${PROJECT_NAME} SHARED ${SRC} ${HDR})
-set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS "-DRLCONTROLLER_EXPORTS")
-target_link_libraries(${PROJECT_NAME} PUBLIC mc_rtc::mc_control_fsm)
-
-# ---- Plugin target (mc_rtc controller entry point) ----
-
-add_controller(${PROJECT_NAME}_controller lib.cpp "")
-target_link_libraries(${PROJECT_NAME}_controller PUBLIC ${PROJECT_NAME})
-
-# ---- Link ONNX to both targets ----
-
-foreach(tgt IN ITEMS ${PROJECT_NAME} ${PROJECT_NAME}_controller)
-  target_include_directories(${tgt} PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
-  target_link_libraries(${tgt} PRIVATE ${ONNXRUNTIME_LIB})
-endforeach()
-
-# ---- Install ----
-
-install(TARGETS ${PROJECT_NAME}
-  ARCHIVE DESTINATION "${MC_RTC_LIBDIR}"
-  LIBRARY DESTINATION "${MC_RTC_LIBDIR}"
-  RUNTIME DESTINATION bin
-)
-
-# ---- Controller state machine ----
 
 add_subdirectory(states)
+
+add_library(${CONTROLLER_NAME} SHARED ${SRC} ${HDR})
+
+target_link_libraries(${CONTROLLER_NAME}
+  PUBLIC
+    mc_rtc::mc_control_fsm
+    ${ONNXRUNTIME_LIB}
+)
+
+target_include_directories(${CONTROLLER_NAME}
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${ONNXRUNTIME_INCLUDE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/RLController>
+)
+
+add_controller(${CONTROLLER_NAME}_controller lib.cpp "")
+target_link_libraries(${CONTROLLER_NAME}_controller PUBLIC ${CONTROLLER_NAME})
+
+install(
+  TARGETS ${CONTROLLER_NAME}
+  DESTINATION ${MC_RTC_LIBDIR}
+  EXPORT ${TARGETS_EXPORT_NAME}
+)
+
+install(
+  FILES RLController.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/RLController
+)
