@@ -229,6 +229,8 @@ policies:
         right_shoulder_yaw_joint: 5.0
         right_elbow_joint: 5.0
     speed_multiplier_joystick: 0.4
+    action_scale: 1.0
+    policy_period_ms: 25.0
 
 use_async_inference: false
 

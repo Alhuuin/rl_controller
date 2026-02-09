@@ -643,32 +643,44 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
 
 void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
 {
+  // load policy specific configuration
+  configRL(config);
+
   auto & real_robot = realRobot(robots()[0].name());
 
-  baseAngVel = real_robot.bodyVelW("pelvis").angular();
-  Eigen::Matrix3d baseRot = real_robot.bodyPosW("pelvis").rotation();
+  std::string baseName;
+  if(robotName == "H1")
+    baseName = "pelvis";
+  // Add other robot base names here if needed
+  else
+    baseName = "root";
+
+
+  baseAngVel = real_robot.bodyVelW(baseName).angular();
+  Eigen::Matrix3d baseRot = real_robot.bodyPosW(baseName).rotation();
   rpy = mc_rbdyn::rpyFromMat(baseRot);
     
   mc_rtc::log::info("[RLController] Posture target initialized with {} joints", dofNumber); 
 
   // Initialize reference position and last actions for action blending
+  size_t vect_size = usedJoints_mcRtcOrder.size(); 
   a_before_vector = Eigen::VectorXd::Zero(dofNumber);
   a_vector = Eigen::VectorXd::Zero(dofNumber);
-  legPos = Eigen::VectorXd::Zero(10);
-  legVel = Eigen::VectorXd::Zero(10);
-  legAction = Eigen::VectorXd::Zero(10);
+  legPos = Eigen::VectorXd::Zero(vect_size);
+  legVel = Eigen::VectorXd::Zero(vect_size);
+  legAction = Eigen::VectorXd::Zero(vect_size);
 
   baseAngVel_prev = Eigen::Vector3d::Zero();
   rpy_prev = Eigen::Vector3d::Zero();
-  legPos_prev = Eigen::VectorXd::Zero(10);
-  legVel_prev = Eigen::VectorXd::Zero(10);
-  legAction_prev = Eigen::VectorXd::Zero(10);
+  legPos_prev = Eigen::VectorXd::Zero(vect_size);
+  legVel_prev = Eigen::VectorXd::Zero(vect_size);
+  legAction_prev = Eigen::VectorXd::Zero(vect_size);
 
   baseAngVel_prev_prev = Eigen::Vector3d::Zero();
   rpy_prev_prev = Eigen::Vector3d::Zero();
-  legPos_prev_prev = Eigen::VectorXd::Zero(10);
-  legVel_prev_prev = Eigen::VectorXd::Zero(10);
-  legAction_prev_prev = Eigen::VectorXd::Zero(10);
+  legPos_prev_prev = Eigen::VectorXd::Zero(vect_size);
+  legVel_prev_prev = Eigen::VectorXd::Zero(vect_size);
+  legAction_prev_prev = Eigen::VectorXd::Zero(vect_size);
 
   a_simuOrder = Eigen::VectorXd::Zero(dofNumber);
 
@@ -684,9 +696,6 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   velCmdRL_ = Eigen::Vector3d::Zero();  // Default command (x, y, yaw)
   phase_ = 0.0;  // Phase for periodic gait
   startPhase_ = std::chrono::steady_clock::now();  // For phase calculation
-
-  // load policy specific configuration
-  configRL(config);
 }
 
 void RLController::configRL(const mc_rtc::Configuration & config)
@@ -747,6 +756,9 @@ void RLController::configRL(const mc_rtc::Configuration & config)
   }
   maxVelCmd = config("policies")[currentPolicyIndex]("speed_multiplier_joystick", 0.6);
   maxYawCmd = config("policies")[currentPolicyIndex]("max_yaw_joystick", 0.7);
+
+  actionScale = config("policies")[currentPolicyIndex]("action_scale", 1.0);
+  policyPeriodMs = config("policies")[currentPolicyIndex]("policy_period_ms", 20.0);
 }
 
 std::tuple<Eigen::VectorXd, Eigen::VectorXd> RLController::getPDGains()
