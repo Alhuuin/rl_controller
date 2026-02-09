@@ -11,7 +11,7 @@ The controller is organized into the following components:
 - **[etc/RLController.in.yaml](etc/RLController.in.yaml)**: Main configuration file for the controller
 - **[RLController](src/RLController.cpp)**: Core FSM controller that integrates RL policies with mc_rtc
 - **[RLPolicyInterface](src/RLPolicyInterface.cpp)**: Handles ONNX model loading and inference
-- **[PolicySimulatorHandling](src/PolicySimulatorHandling.cpp)**: Manages simulator-specific variations (e.g., joint ordering differences)
+- **[PolicySimulatorHandling](src/PolicySimulatorHandling.cpp)**: Manages different rl training environment (e.g., joint ordering differences)
 - **[states/RL_State](src/states/RL_State.cpp)**: FSM state that executes the RL policy and applies torque commands
 
 ## Building
@@ -33,11 +33,11 @@ make install
 
 ## Usage
 
-### Robot and Simulator Support
+### Robot and RL Training Environment Support
 
 The controller is optimized for the H1 humanoid robot with minimal configuration required. Support for other robots is possible with additional adaptation (see [Adding a New Robot](#adding-a-new-robot)).
 
-Policies trained in ManiSkill and IsaacLab are fully supported. For policies from other training environments, you can add custom simulator support (see [Adding a New Simulator](#adding-a-new-simulator)).
+Policies trained in ManiSkill and IsaacLab are fully supported. For policies from other training environments, you can add custom simulator support (see [Adding a New RL Training Environment](#adding-a-new-rl-training-environment)).
 
 ### Policy Management
 
@@ -54,14 +54,16 @@ For policies that support velocity commands, control using the mc_joystick plugi
 - **Add your policy files** to the [`policy/`](policy/) directory (ONNX format)
 
 - **Configure policy parameters** in [`etc/RLController.in.yaml`](etc/RLController.in.yaml). Each policy can specify:
-   - Robot name*
-   - Control mode (position/torque)*
-   - QP usage (true/false)*
-   - Simulator used during training*
-   - Joints indices by policy*
-   - PD gains ratio
-   - PD gains (kp and kd)*
-   - speed of the control (in m/s) when using the joystick plugin
+   - `*robot_name`: Robot name
+   - `*is_torque_control`: Control mode (position/torque)
+   - `*use_QP`: QP usage (true/false)
+   - `*simulator`: RL env used during training
+   - `*used_joints_index`: Joints indices by policy (mc_rtc order)
+   - `pd_gains_ratio`: PD gains ratio
+   - `*kp, kd`: PD gains (kp and kd)
+   - `speed_multiplier_joystick`: max speed of the control (in m/s) when using the joystick plugin
+   - `action_scale`: RL action scale (multiplicator)
+   - `policy_period_ms`: policy period (ms)
 
 Parameters with "*" are necessary. The others are optional.
 
@@ -71,16 +73,22 @@ Parameters with "*" are necessary. The others are optional.
 
 ## Advanced Setup
 
-### Adding a New Simulator
+### Adding a New RL Training Environment
 
-Some simulators use different joint ordering than the URDF/mc_rtc convention. To add support:
+Some RL training environments use different joint ordering than the URDF/mc_rtc convention. To add support:
 
 - Define the joint mapping in [`src/PolicySimulatorHandling.h`](src/PolicySimulatorHandling.h) by setting the `mcRtcToSimuIdx_` member variable
 - If the mapping is defined in the header, the class will automatically handle unrecognized simulator or robot names
+- You can generate automatically the corresponding mapping using the `generate_joint_mapping.py` script, either by modifying the example joints in the script or by specifying source (mc_rtc joint order) and target (RL training env joint order) files. The expected format is one joint name per line.
+Example of use :
+```bash
+./generate_joint_mapping.py --source <mc_rtc_joints_order_file> --target <rl_env_joints_order_file>
+```
 
 ### Adding a New Robot
 
 To use the controller with a different robot, modify the following:
 
 - **Configuration file** ([`etc/RLController.in.yaml`](etc/RLController.in.yaml#L60) (l.60)) : Add your robot under the `Robot` category with the `mc_rtc_joints_order` corresponding to the joints in URDF order
-- **Joint mapping** ([`src/PolicySimulatorHandling.h`](src/PolicySimulatorHandling.h)): Specify the `mcRtcToSimuIdx_` mapping for your robot, similar to adding a new simulator 
+- **Joint mapping** ([`src/PolicySimulatorHandling.h`](src/PolicySimulatorHandling.h)): Specify the `mcRtcToSimuIdx_` mapping for your robot, similar to adding a new simulator (see [Adding a New RL Training Environment](#adding-a-new-rl-training-environment)).
+- **Robot base name** ([`src/RLController.cpp`](src/RLController.cpp#L651)): If the added robot's base is not named 'root', you will need to add a condition here to handle it.
