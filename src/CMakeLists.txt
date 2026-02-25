@@ -54,6 +54,6 @@ install(
 )
 
 install(
-  FILES RLController.h
+  FILES RLController.h api.h PolicySimulatorHandling.h utils.h RLPolicyInterface.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/RLController
 )
