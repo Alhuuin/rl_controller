@@ -5,7 +5,7 @@
 #include <filesystem>
 
 RLPolicyInterface::RLPolicyInterface(const std::string & policyPath)
-: isLoaded_(false), policyPath_(policyPath), inputSize_(0), outputSize_(0), inputIs2D_(false), outputIs2D_(false)
+: inputSize_(0), outputSize_(0), inputIs2D_(false), outputIs2D_(false), isLoaded_(false), policyPath_(policyPath)
 {
   loadPolicy(policyPath);
 }
@@ -178,7 +178,7 @@ void RLPolicyInterface::loadPolicy(const std::string & path)
     mc_rtc::log::info("  Output name: {}", outputName_);
     
     // Test inference with appropriate tensor shape
-    std::vector<float> testInput(getObservationSize(), 0.0f);
+    std::vector<float> testInput(static_cast<size_t>(getObservationSize()), 0.0f);
     std::vector<int64_t> testInputShape;
     if(inputIs2D_)
     {
@@ -256,8 +256,8 @@ Eigen::VectorXd RLPolicyInterface::predict(const Eigen::VectorXd & observation)
 Eigen::VectorXd RLPolicyInterface::runOnnxInference(const Eigen::VectorXd & observation)
 {
   // Convert Eigen vector to float vector
-  std::vector<float> inputData(observation.size());
-  for(int i = 0; i < observation.size(); ++i)
+  std::vector<float> inputData(static_cast<size_t>(observation.size()));
+  for(Eigen::Index i = 0; i < observation.size(); ++i)
   {
     inputData[i] = static_cast<float>(observation(i));
   }

@@ -29,6 +29,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   void reset(const mc_control::ControllerResetData & reset_data) override;
 
   void RLuseJoyStickInputs();
+  void RLuseKeyboardInputs();
 
   void loadConfig(const mc_rtc::Configuration & config);
   void switchPolicy(int policyIndex, const mc_rtc::Configuration & config);  // Switch to a different policy at runtime

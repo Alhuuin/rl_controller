@@ -39,13 +39,13 @@ PolicySimulatorHandling::~PolicySimulatorHandling()
 
 Eigen::VectorXd PolicySimulatorHandling::reorderJointsToSimulator(const Eigen::VectorXd & obs, size_t dofNumber)
 {  
-  if(obs.size() != dofNumber) {
+  if(static_cast<size_t>(obs.size()) != dofNumber) {
     mc_rtc::log::error("Observation reordering expects dofNumber joints, got {}", obs.size());
     return obs;
   }
   
   Eigen::VectorXd reordered = Eigen::VectorXd::Zero(dofNumber);
-  for(int i = 0; i < dofNumber; i++) {
+  for(size_t i = 0; i < dofNumber; i++) {
     if(i >= mcRtcToSimuIdx_.size()) {
       mc_rtc::log::error("Trying to access mcRtcToSimuIdx_[{}] but size is {}", i, mcRtcToSimuIdx_.size());
       reordered[i] = 0.0;
@@ -66,13 +66,13 @@ Eigen::VectorXd PolicySimulatorHandling::reorderJointsToSimulator(const Eigen::V
 
 Eigen::VectorXd PolicySimulatorHandling::reorderJointsFromSimulator(const Eigen::VectorXd & action, size_t dofNumber)
 {  
-  if(action.size() != dofNumber) {
+  if(static_cast<size_t>(action.size()) != dofNumber) {
     mc_rtc::log::error("Action reordering expects dofNumber joints, got {}", action.size());
     return action;
   }
   
   Eigen::VectorXd reordered = Eigen::VectorXd::Zero(dofNumber);
-  for(int i = 0; i < dofNumber; i++) {
+  for(size_t i = 0; i < dofNumber; i++) {
     if(i >= simuToMcRtcIdx_.size()) {
       mc_rtc::log::error("Trying to access simuToMcRtcIdx_[{}] but size is {}", i, simuToMcRtcIdx_.size());
       reordered[i] = 0.0;
@@ -98,7 +98,7 @@ std::vector<int> PolicySimulatorHandling::invertMapping(const std::vector<int>& 
   for (size_t i = 0; i < jointsMap.size(); ++i)
   {
       int simu = jointsMap[i];
-      simuToMcRtc[simu] = i;
+      simuToMcRtc[simu] = static_cast<int>(i);
   }
 
   return simuToMcRtc;
@@ -109,7 +109,7 @@ std::vector<int> PolicySimulatorHandling::getSimulatorIndices(std::vector<int> m
   std::vector<int> simuIndices;
   for(int idx : mcRtcIndices)
   {
-      if(idx < simuToMcRtcIdx_.size())
+      if(static_cast<size_t>(idx) < simuToMcRtcIdx_.size())
       {
           simuIndices.push_back(simuToMcRtcIdx_[idx]);
       }

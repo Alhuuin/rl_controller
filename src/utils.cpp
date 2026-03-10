@@ -64,7 +64,7 @@ void utils::run_rl_state(mc_control::fsm::Controller & ctl_, std::string state_n
           
           double currentTime = std::chrono::duration<double>(
             std::chrono::high_resolution_clock::now().time_since_epoch()).count();
-          double avgFreq = stepCount_ / (currentTime - startTime_);
+          double avgFreq = static_cast<double>(stepCount_) / (currentTime - startTime_);
           
           const char* mode = ctl.useAsyncInference_ ? "async" : "sync";
           mc_rtc::log::info("{} Step {} ({}): inference time = {} μs, avg policy freq = {:.1f} Hz",
@@ -99,7 +99,6 @@ void utils::run_rl_state(mc_control::fsm::Controller & ctl_, std::string state_n
 
 void utils::teardown_rl_state(mc_control::fsm::Controller & ctl_, std::string state_name)
 {
-  auto & ctl = static_cast<RLController&>(ctl_);
   mc_rtc::log::info("{} state ending after {} steps", state_name, stepCount_);
 
   ctl_.gui()->removeCategory({"RLController", state_name});
@@ -107,7 +106,7 @@ void utils::teardown_rl_state(mc_control::fsm::Controller & ctl_, std::string st
   double currentTime = std::chrono::duration<double>(
     std::chrono::high_resolution_clock::now().time_since_epoch()).count();
   double totalTime = currentTime - startTime_;
-  double avgFreq = stepCount_ / totalTime;
+  double avgFreq = static_cast<double>(stepCount_) / totalTime;
 
   mc_rtc::log::info("{} final stats: {} steps in {:.2f}s, avg freq = {:.1f} Hz",
                     state_name, stepCount_, totalTime, avgFreq);
@@ -247,7 +246,7 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
       {
         auto currentTime = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - ctl.startPhase_);
-        ctl.phase_ = fmod(elapsed.count() * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
+        ctl.phase_ = fmod(static_cast<double>(elapsed.count()) * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
       }
 
       obs(35) = sin(ctl.phase_);
@@ -262,17 +261,12 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
       ctl.baseAngVel_prev_prev = ctl.baseAngVel_prev;
       ctl.baseAngVel_prev = ctl.baseAngVel;
       ctl.baseAngVel = imu.angularVelocity();
-      obs(0) = ctl.baseAngVel.x(); //base angular vel
-      obs(1) = ctl.baseAngVel.y();
-      obs(2) = ctl.baseAngVel.z();
 
       // Eigen::Matrix3d baseRot = robot.bodyPosW("pelvis").rotation();
       Eigen::Matrix3d baseRot = imu.orientation().toRotationMatrix().normalized();
       ctl.rpy_prev_prev = ctl.rpy_prev;
       ctl.rpy_prev = ctl.rpy;
       ctl.rpy = mc_rbdyn::rpyFromMat(baseRot);
-      obs(3) = ctl.rpy(0);  // roll
-      obs(4) = ctl.rpy(1);  // pitch
 
       Eigen::VectorXd reorderedPos = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentPos, ctl.dofNumber);
       Eigen::VectorXd reorderedVel = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentVel, ctl.dofNumber);
@@ -297,9 +291,6 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
         }
       }
 
-      obs.segment(5, 10) = ctl.legPos;
-      obs.segment(15, 10) = ctl.legVel;
-
       // past action: reorder to Simulator format and extract leg joints
       for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
       {
@@ -311,22 +302,15 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
           ctl.legAction(i) = ctl.a_simuOrder(idx);
         }
       }
-      obs.segment(25, 10) = ctl.legAction;
 
       // Phase
       if(ctl.useAsyncInference_)
       {
         auto currentTime = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - ctl.startPhase_);
-        ctl.phase_ = fmod(elapsed.count() * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
+        ctl.phase_ = fmod(static_cast<double>(elapsed.count()) * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
       }
-
-      obs(35) = sin(ctl.phase_);
-      obs(36) = cos(ctl.phase_);
-
-      // Command (3 elements) - [vx, vy, yaw_rate]
-      obs.segment(37, 3) = ctl.velCmdRL_;
-
+      
       obs.segment(0, 3) = ctl.baseAngVel * 0.25;
       obs.segment(3, 3) = ctl.baseAngVel_prev * 0.25;
       obs.segment(6, 3) = ctl.baseAngVel_prev_prev * 0.25;
@@ -370,7 +354,6 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
       ctl.baseAngVel = floatingBase_alphaInRL.segment(0, 3);
       ctl.baseLinVel = floatingBase_alphaInRL.segment(3, 3);
       
-      //ctl.projected_gravity = imu.
       obs(0) = ctl.baseLinVel.x(); // base linear vel
       obs(1) = ctl.baseLinVel.y();
       obs(2) = ctl.baseLinVel.z();
@@ -428,30 +411,33 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
     }
     case 4:
     {
-      // Get velocity from robot body instead of IMU sensor (which is not populated in loopback mode)
       const auto & floatingBaseBody = robot.mb().body(0).name();
-      ctl.baseLinVel = robot.bodyVelW(floatingBaseBody).linear();
-      obs(0) = ctl.baseLinVel.x();
-      obs(1) = ctl.baseLinVel.y();
-      obs(2) = ctl.baseLinVel.z();
-
-      ctl.baseAngVel = robot.bodyVelW(floatingBaseBody).angular();
-      obs(3) = ctl.baseAngVel.x();
-      obs(4) = ctl.baseAngVel.y();
-      obs(5) = ctl.baseAngVel.z();
+      Eigen::Vector3d baseLinVelW = robot.bodyVelW(floatingBaseBody).linear();
+      Eigen::Vector3d baseAngVelW = robot.bodyVelW(floatingBaseBody).angular();
 
       Eigen::Vector3d gravity(0, 0, -9.81);
-      Eigen::Quaterniond q_imu_to_world = imu.orientation();
+      Eigen::Quaterniond q_imu_to_world;
       auto qInRL = real_robot.mbc().q;
       Eigen::VectorXd floatingBase_qInRL = rbd::paramToVector(real_robot.mb(), qInRL);
-      // // Suppose you have the IMU orientation (rotation from IMU to world)
       Eigen::VectorXd q_imu_vector = floatingBase_qInRL.segment(0, 4);
       q_imu_to_world.w() = q_imu_vector(0);
       q_imu_to_world.x() = q_imu_vector(1);
       q_imu_to_world.y() = q_imu_vector(2);
       q_imu_to_world.z() = q_imu_vector(3);
-      Eigen::Matrix3d R_world_to_imu = q_imu_to_world.toRotationMatrix();
-      Eigen::Vector3d gravity_b = R_world_to_imu.transpose() * gravity;
+      Eigen::Matrix3d R_imu_to_world = q_imu_to_world.toRotationMatrix();
+
+      // velocities expressed in the base frame.
+      ctl.baseLinVel = R_imu_to_world.transpose() * baseLinVelW;
+      obs(0) = ctl.baseLinVel.x();
+      obs(1) = ctl.baseLinVel.y();
+      obs(2) = ctl.baseLinVel.z();
+
+      ctl.baseAngVel = R_imu_to_world.transpose() * baseAngVelW;
+      obs(3) = ctl.baseAngVel.x();
+      obs(4) = ctl.baseAngVel.y();
+      obs(5) = ctl.baseAngVel.z();
+
+      Eigen::Vector3d gravity_b = R_imu_to_world.transpose() * gravity;
       Eigen::Vector3d gravity_b_dir = gravity_b.normalized();
       ctl.projected_gravity = gravity_b_dir;
       obs(6) = ctl.projected_gravity.x(); // base linear acc
@@ -463,6 +449,7 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
 
       Eigen::VectorXd reorderedPos = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentPos, ctl.dofNumber);
       Eigen::VectorXd reorderedVel = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentVel, ctl.dofNumber);
+      Eigen::VectorXd reorderedQZero = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.q_zero_vector, ctl.dofNumber);
       for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
       {
         int idx = ctl.usedJoints_simuOrder[i];
@@ -471,7 +458,8 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
           ctl.legPos(i) = 0.0;
           ctl.legVel(i) = 0.0;
         } else {
-          ctl.legPos(i) = reorderedPos(idx);
+          // IsaacLab observation uses joint_pos_rel = joint_pos - default_joint_pos.
+          ctl.legPos(i) = reorderedPos(idx) - reorderedQZero(idx);
           ctl.legVel(i) = reorderedVel(idx);
         }
       }
@@ -485,7 +473,8 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
           mc_rtc::log::error("Past action index {} out of bounds for size {}", idx, ctl.a_simuOrder.size());
           ctl.legAction(i) = 0.0;
         } else {
-          ctl.legAction(i) = ctl.a_simuOrder(idx);
+          // here storing raw policy outputs, not scaled joint deltas
+          ctl.legAction(i) = (std::abs(ctl.actionScale) > 1e-9) ? ctl.a_simuOrder(idx) / ctl.actionScale : 0.0;
         }
       }
       obs.segment(36, 12) = ctl.legAction;
@@ -507,7 +496,7 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
   bool newActionApplied = false;
   Eigen::VectorXd fullAction;
 
-  if (action.size() == ctl.dofNumber)
+  if (static_cast<size_t>(action.size()) == ctl.dofNumber)
     fullAction = action;
   else
   {
@@ -519,7 +508,7 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
       int idx = ctl.usedJoints_simuOrder[i];
       if(idx >= fullAction.size()) {
         mc_rtc::log::error("Joint index {} out of bounds for fullAction size {}", idx, fullAction.size());
-      } else if(i >= action.size()) {
+      } else if(static_cast<Eigen::Index>(i) >= action.size()) {
         mc_rtc::log::error("Action index {} out of bounds for action size {}", i, action.size());
       } else {
         fullAction(idx) = action(i); // Set leg joint action
@@ -535,7 +524,7 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
     // Update lastActions_
     ctl.a_before_vector = ctl.a_vector;
     // Run new inference and update target position, scaled by action scale
-    ctl.a_vector = ctl.policySimulatorHandling_->reorderJointsFromSimulator(fullAction, ctl.dofNumber) * ctl.actionScale; // TODO: add action scale
+    ctl.a_vector = ctl.policySimulatorHandling_->reorderJointsFromSimulator(fullAction, ctl.dofNumber) * ctl.actionScale;
     ctl.q_rl = ctl.q_zero_vector + ctl.a_vector;
 
     // For not controlled joints, use the zero position
@@ -629,7 +618,7 @@ void utils::inferenceThreadFunction(mc_control::fsm::Controller & ctl_)
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastInference = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastInferenceTime_);
       // auto startTime = std::chrono::high_resolution_clock::now();
-      shouldRunInference_ = timeSinceLastInference.count() >= ctl.policyPeriodMs;
+      shouldRunInference_ = static_cast<double>(timeSinceLastInference.count()) >= ctl.policyPeriodMs;
 
       newActionAvailable_ = shouldRunInference_;
 

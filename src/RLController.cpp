@@ -12,7 +12,11 @@
 #include <mc_joystick_plugin/joystick_inputs.h>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <fcntl.h>
 #include <numeric>
+#include <termios.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -20,8 +24,6 @@
 mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & config)
 {
   mc_rtc::Configuration modifiedConfig = config;
-  
-  // Check MainRobot from global or controller config
   std::string mainRobot = config("MainRobot", std::string(""));
   mc_rtc::log::info("[RLController] MainRobot detected: '{}'", mainRobot);
   
@@ -30,12 +32,10 @@ mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & c
   {
     // Remove BodySensor observer if H1, keeping Tilt
     configureObservers("BodySensor", modifiedConfig);
-
     bool hasPlugin = false;
     if(modifiedConfig.has("Plugins"))
     {
       auto plugins = modifiedConfig("Plugins");
-      // Check if ExternalForcesEstimator is already in the list
       for(size_t i = 0; i < plugins.size(); ++i)
       {
         std::string pluginName = plugins[i];
@@ -45,10 +45,8 @@ mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & c
           break;
         }
       }
-      
       if(!hasPlugin)
       {
-        // Build new plugins list with ExternalForcesEstimator added
         std::vector<std::string> pluginJsons;
         for(size_t i = 0; i < plugins.size(); ++i)
         {
@@ -68,7 +66,6 @@ mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & c
     }
     else
     {
-      // No plugins exist, create new list
       mc_rtc::Configuration plugins;
       plugins.loadData("[\"ExternalForcesEstimator\"]");
       modifiedConfig.add("Plugins", plugins);
@@ -91,7 +88,6 @@ void RLController::configureObservers(const std::string &observerName, mc_rtc::C
   if(!observerPipeline.has("observers")) return;
   
   auto observers = observerPipeline("observers");
-  // Build JSON string for filtered observers
   std::vector<std::string> observerJsons;
   observerJsons.reserve(observers.size());
   
@@ -106,8 +102,7 @@ void RLController::configureObservers(const std::string &observerName, mc_rtc::C
         observerJsons.push_back(obs.dump(false, false));
       }
     }
-  }
-  
+  } 
   std::string arrayJson = "[" + std::accumulate(observerJsons.begin(), observerJsons.end(), std::string(),
     [](const std::string& a, const std::string& b) -> std::string {
       return a.empty() ? b : a + "," + b;
@@ -148,9 +143,9 @@ bool RLController::run()
 {
   // Test joystick inputs
   if(datastore().has("Joystick::connected") && datastore().get<bool>("Joystick::connected"))
-  {
     RLuseJoyStickInputs();
-  }
+  else
+    RLuseKeyboardInputs();
   
   counter += timeStep;
   if(robotName == "H1")
@@ -175,7 +170,7 @@ bool RLController::run()
   robot().forwardKinematics();
   robot().forwardVelocity();
   robot().forwardAcceleration();
-  if(!useQP) // Run RL without taking account of the QP
+  if(!useQP) // Run RL without taking the QP into account
   {
     q_cmd = q_rl; // Use the RL position as the commanded position
     tau_cmd = (pd_gains_ratio * kp_vector).cwiseProduct(q_rl - currentPos) - (pd_gains_ratio * kd_vector).cwiseProduct(currentVel);
@@ -199,7 +194,6 @@ void RLController::reset(const mc_control::ControllerResetData & reset_data)
 void RLController::RLuseJoyStickInputs()
 {
   // Get joystick functions
-  auto & buttonFunc = datastore().get<std::function<bool(joystickButtonInputs)>>("Joystick::Button");
   auto & stickFunc = datastore().get<std::function<Eigen::Vector2d(joystickAnalogicInputs)>>("Joystick::Stick");
   
   // Read sticks values
@@ -259,6 +253,42 @@ void RLController::RLuseJoyStickInputs()
   }
 }
 
+void RLController::RLuseKeyboardInputs()
+{
+  struct Ctx { bool ready = false; termios old{}; bool seen[4] = {}; 
+    std::chrono::steady_clock::time_point ts[4]; std::array<char, 64> buf{}; size_t sz = 0; };
+  static Ctx k;
+
+  if(!k.ready) {
+    if(::isatty(STDIN_FILENO) != 1) return;
+    k.ready = true;
+    ::tcgetattr(STDIN_FILENO, &k.old);
+    termios raw = k.old; raw.c_lflag &= ~(ICANON | ECHO); raw.c_cc[VMIN] = raw.c_cc[VTIME] = 0;
+    ::tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+    ::fcntl(STDIN_FILENO, F_SETFL, ::fcntl(STDIN_FILENO, F_GETFL, 0) | O_NONBLOCK);
+  }
+
+  char tmp[32]; ssize_t n = ::read(STDIN_FILENO, tmp, sizeof(tmp));
+  if(n > 0 && k.sz + n < 64) std::copy(tmp, tmp + n, k.buf.begin() + k.sz), k.sz += n;
+  
+  auto now = std::chrono::steady_clock::now();
+  for(size_t i = 0; i + 2 < k.sz; ++i)
+    if(k.buf[i] == 27 && k.buf[i + 1] == '[') {
+      int idx = k.buf[i + 2] == 'A' ? 0 : k.buf[i + 2] == 'B' ? 1 : k.buf[i + 2] == 'D' ? 2 : k.buf[i + 2] == 'C' ? 3 : -1;
+      if(idx >= 0) k.seen[idx] = true, k.ts[idx] = now;
+      i += 2;
+    }
+  std::copy(k.buf.begin() + (k.sz > 2 ? k.sz - 2 : 0), k.buf.begin() + k.sz, k.buf.begin());
+  k.sz = k.sz > 2 ? 2 : 0;
+
+  const auto active = [&](int i) { return k.seen[i] && 
+    std::chrono::duration_cast<std::chrono::milliseconds>(now - k.ts[i]).count() < 500; };
+  velCmdRL_.setZero();
+  velCmdRL_(0) = (active(0) ? maxVelCmd : 0.0) - (active(1) ? maxVelCmd : 0.0);
+  velCmdRL_(1) = (active(2) ? maxVelCmd : 0.0) - (active(3) ? maxVelCmd : 0.0);
+}
+
+
 void RLController::loadConfig(const mc_rtc::Configuration & config)
 { 
   // Load policy paths from config
@@ -310,7 +340,7 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   std::map<std::string, double> kd = config("policies")[currentPolicyIndex]("kd");
 
   for(size_t i = 0; i < dofNumber; ++i) {
-    const auto & jName = robot().mb().joint(i + 1).name();  // +1 to skip Root
+    const auto & jName = robot().mb().joint(static_cast<int>(i + 1)).name();  // +1 to skip Root
     if(kp.count(jName)) {
       kp_vector(i) = kp[jName];
     }
@@ -324,7 +354,6 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
 
 void RLController::tasksComputation(Eigen::VectorXd & currentTargetPosition)
 {
-  auto & robot = robots()[0];
   auto & real_robot = realRobot(robots()[0].name());
 
   auto q = real_robot.encoderValues();
@@ -576,7 +605,7 @@ void RLController::addGui(const mc_rtc::Configuration & config)
         // Find the index of the selected policy
         auto it = std::find(policyPaths.begin(), policyPaths.end(), selected);
         if(it != policyPaths.end()) {
-          int newIndex = std::distance(policyPaths.begin(), it);
+          int newIndex = static_cast<int>(std::distance(policyPaths.begin(), it));
           mc_rtc::log::info("User requested policy switch to [{}]: {}", newIndex, selected);
           // Switch to new policy without reinitializing robot
           switchPolicy(newIndex, config);
@@ -772,18 +801,9 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   else
     baseName = "root";
 
-  auto & imu = robot().bodySensor("Accelerometer");
+  projected_gravity = Eigen::Vector3d::Zero();
+  baseAngVel = real_robot.bodyVelW(baseName).angular();
 
-  // baseAngVel = real_robot.bodyVelW(baseName).angular();
-  baseAngVel = imu.angularVelocity();
-
-  Eigen::Vector3d gravity(0, 0, -9.81);
-  Eigen::Quaterniond q_imu_to_world = imu.orientation();
-  Eigen::Matrix3d R_world_to_imu = q_imu_to_world.toRotationMatrix();
-  Eigen::Vector3d gravity_b = R_world_to_imu.transpose() * gravity;
-  Eigen::Vector3d gravity_b_dir = gravity_b.normalized();
-
-  projected_gravity = gravity_b_dir;
   auto alphaInRL = real_robot.mbc().alpha;
   Eigen::VectorXd floatingBase_alphaInRL = rbd::dofToVector(robot().mb(), alphaInRL);
   baseLinVel = floatingBase_alphaInRL.segment(3, 3);

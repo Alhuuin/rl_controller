@@ -104,7 +104,7 @@ Robot:
 
 
 policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx", "walking_lockstep_h1.onnx", "go2.onnx"]  # Path to the RL policy file(s)
-default_policy_index: 0 # Index of the default policy to use
+default_policy_index: 4 # Index of the default policy to use
 policies:
   # index 0 : standing_policy
   - robot_name: "H1"
@@ -297,8 +297,8 @@ policies:
         right_shoulder_yaw_joint: 10.0
         right_elbow_joint: 10.0
     speed_multiplier_joystick: 0.4
-    action_scale: 0.5
-    policy_period_ms: 25.0
+    action_scale: 0.25
+    policy_period_ms: 20.0
   # index 4 : Go2 walking policy
   - robot_name: "Go2"
     is_torque_control: false
@@ -333,8 +333,8 @@ policies:
         RL_thigh_joint: 0.5
         RL_calf_joint: 0.5
     speed_multiplier_joystick: 0.4
-    action_scale: 0.5
-    policy_period_ms: 25.0
+    action_scale: 0.25
+    policy_period_ms: 20.0
 
 use_async_inference: false
 
