@@ -803,10 +803,7 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
 
   projected_gravity = Eigen::Vector3d::Zero();
   baseAngVel = real_robot.bodyVelW(baseName).angular();
-
-  auto alphaInRL = real_robot.mbc().alpha;
-  Eigen::VectorXd floatingBase_alphaInRL = rbd::dofToVector(robot().mb(), alphaInRL);
-  baseLinVel = floatingBase_alphaInRL.segment(3, 3);
+  baseLinVel = real_robot.bodyVelW(baseName).linear();
 
   Eigen::Matrix3d baseRot = real_robot.bodyPosW(baseName).rotation();
   rpy = mc_rbdyn::rpyFromMat(baseRot);
