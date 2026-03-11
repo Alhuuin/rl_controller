@@ -54,6 +54,13 @@ install(
 )
 
 install(
+  DIRECTORY ${ONNXRUNTIME_LIB_DIR}/
+  DESTINATION ${MC_RTC_LIBDIR}
+  FILES_MATCHING
+    PATTERN "libonnxruntime*.so*"
+)
+
+install(
   FILES RLController.h api.h PolicySimulatorHandling.h utils.h RLPolicyInterface.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/RLController
 )
