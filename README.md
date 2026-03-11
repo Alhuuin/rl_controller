@@ -1,6 +1,6 @@
 # RLController
 
-An FSM controller that integrates reinforcement learning policies with [mc_rtc](https://jrl-umi3218.github.io/mc_rtc/) for robotic control. This package provides example policies for the H1 humanoid robot and supports ONNX format for policy deployment.
+An FSM controller that integrates reinforcement learning policies with [mc_rtc](https://jrl-umi3218.github.io/mc_rtc/) for robotic control. This package provides example policies for the H1 humanoid robot and the Go2 robot. It currently only supports ONNX format for policy deployment.
 
 **Note**: ONNX Runtime is bundled with this repository—no external installation required.
 
@@ -20,7 +20,7 @@ The controller is organized into the following components:
 
 All required dependencies and their specific versions are available in this branch of the [mc_rtc_superbuild](https://github.com/Alhuuin/mc-rtc-superbuild/tree/rl_controller) if you need a quick installation setup.
 
-The use of the ExternalForcesEstimator plugin is highly necessary, it is thus enabled by default in the controller config file.
+The use of the ExternalForcesEstimator plugin is highly necessary with humanoid robots, it is thus enabled by default in that case.
 
 ### Build commands
 
@@ -45,9 +45,11 @@ Default policies are located in the [`policy/`](policy/) directory. The controll
 
 **Important**: Policy transitions should be compatible with the current state. For example, switching from standing to walking works because the walking policy can handle observations from a standing state, but the reverse may not be true without proper handling.
 
-### Velocity Control with Joystick
+### Velocity Control
 
-For policies that support velocity commands, control using the mc_joystick plugin is now supported. This allows real-time velocity yaw control through a game controller using the left joystick or left arrows and yaw control using the right joystick.
+For policies that support velocity commands, two control method are supported :
+- control using the mc_joystick plugin is fully supported. This allows real-time velocity yaw control through a game controller using the left joystick or left arrows and yaw control using the right joystick.
+- control using keyboard arrows is precarious but is available. Currently only x and y control is possible with this method.
 
 ### Configuring Policies
 
@@ -59,15 +61,17 @@ For policies that support velocity commands, control using the mc_joystick plugi
    - QP usage (true/false)*
    - Simulator used during training*
    - Joints indices by policy*
-   - PD gains ratio
    - PD gains (kp and kd)*
-   - speed of the control (in m/s) when using the joystick plugin
+   - PD gains ratio
+   - Speed of the control (in m/s) when using the joystick plugin
+   - Actions scale
 
 Parameters with "*" are necessary. The others are optional.
 
 - **Define observation vectors** in [`src/utils.cpp`](src/utils.cpp#L131) (l.131). The file includes default examples for:
-   - Standing policy (case 0)
-   - Walking policies (cases 1-2)
+   - Standing policy for H1 (case 0)
+   - Walking policies for H1 (cases 1-2)
+   - Walking policy for Go2 (3)
 
 ## Advanced Setup
 
