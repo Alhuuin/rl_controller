@@ -1,21 +1,13 @@
 #pragma once
 
 #include <mc_control/fsm/Controller.h>
-#include <mc_rtc/Configuration.h>
 #include <mc_tasks/TorqueTask.h>
-#include <mc_tasks/PostureTask.h>
 
 #include "api.h"
 
 #include "RLPolicyInterface.h"
 #include "PolicySimulatorHandling.h"
 #include "utils.h"
-
-#include <memory>
-#include <Eigen/Dense>
-
-#include <chrono>
-#include <vector>
 
 struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 {
