@@ -18,14 +18,9 @@ PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_na
     simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
     return;
   }
-  if(robot_name == "H1" && (simulator_name == "Maniskill" || simulator_name == "IsaacLab"))
+  if(robot_name == "h1" && (simulator_name == "Maniskill" || simulator_name == "IsaacLab"))
   {
       mcRtcToSimuIdx_ = {0, 5, 10, 1, 6, 11, 15, 2, 7, 12, 16, 3, 8, 13, 17, 4, 9, 14, 18};
-      simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
-  }
-  else if(robot_name == "Go2" && (simulator_name == "Maniskill" || simulator_name == "IsaacLab"))
-  {
-      mcRtcToSimuIdx_ = {3, 0, 9, 6, 4, 1, 10, 7, 5, 2, 11, 8};
       simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
   }
   else {
@@ -37,22 +32,22 @@ PolicySimulatorHandling::~PolicySimulatorHandling()
 {
 }
 
-Eigen::VectorXd PolicySimulatorHandling::reorderJointsToSimulator(const Eigen::VectorXd & obs, size_t dofNumber)
+Eigen::VectorXd PolicySimulatorHandling::reorderJointsToSimulator(const Eigen::VectorXd & obs, int dofNumber)
 {  
-  if(static_cast<size_t>(obs.size()) != dofNumber) {
+  if(obs.size() != dofNumber) {
     mc_rtc::log::error("Observation reordering expects dofNumber joints, got {}", obs.size());
     return obs;
   }
   
   Eigen::VectorXd reordered = Eigen::VectorXd::Zero(dofNumber);
-  for(size_t i = 0; i < dofNumber; i++) {
-    if(i >= mcRtcToSimuIdx_.size()) {
+  for(int i = 0; i < dofNumber; i++) {
+    if(i >= int(mcRtcToSimuIdx_.size())) {
       mc_rtc::log::error("Trying to access mcRtcToSimuIdx_[{}] but size is {}", i, mcRtcToSimuIdx_.size());
       reordered[i] = 0.0;
       continue;
     }
     
-    int srcIdx = mcRtcToSimuIdx_[i];
+    int srcIdx = mcRtcToSimuIdx_[size_t(i)];
     if(srcIdx >= obs.size()) {
       mc_rtc::log::error("Index {} out of bounds for obs size {}", srcIdx, obs.size());
       reordered[i] = 0.0;
@@ -64,22 +59,22 @@ Eigen::VectorXd PolicySimulatorHandling::reorderJointsToSimulator(const Eigen::V
   return reordered;
 }
 
-Eigen::VectorXd PolicySimulatorHandling::reorderJointsFromSimulator(const Eigen::VectorXd & action, size_t dofNumber)
+Eigen::VectorXd PolicySimulatorHandling::reorderJointsFromSimulator(const Eigen::VectorXd & action, int dofNumber)
 {  
-  if(static_cast<size_t>(action.size()) != dofNumber) {
+  if(action.size() != dofNumber) {
     mc_rtc::log::error("Action reordering expects dofNumber joints, got {}", action.size());
     return action;
   }
   
   Eigen::VectorXd reordered = Eigen::VectorXd::Zero(dofNumber);
-  for(size_t i = 0; i < dofNumber; i++) {
-    if(i >= simuToMcRtcIdx_.size()) {
+  for(int i = 0; i < dofNumber; i++) {
+    if(i >= int(simuToMcRtcIdx_.size())) {
       mc_rtc::log::error("Trying to access simuToMcRtcIdx_[{}] but size is {}", i, simuToMcRtcIdx_.size());
       reordered[i] = 0.0;
       continue;
     }
     
-    int srcIdx = simuToMcRtcIdx_[i];
+    int srcIdx = simuToMcRtcIdx_[size_t(i)];
     if(srcIdx >= action.size()) {
       mc_rtc::log::error("Action reorder index {} out of bounds for action size {}", srcIdx, action.size());
       reordered[i] = 0.0;
@@ -98,7 +93,7 @@ std::vector<int> PolicySimulatorHandling::invertMapping(const std::vector<int>& 
   for (size_t i = 0; i < jointsMap.size(); ++i)
   {
       int simu = jointsMap[i];
-      simuToMcRtc[simu] = static_cast<int>(i);
+      simuToMcRtc[size_t(simu)] = static_cast<int>(i);
   }
 
   return simuToMcRtc;
@@ -111,7 +106,7 @@ std::vector<int> PolicySimulatorHandling::getSimulatorIndices(std::vector<int> m
   {
       if(static_cast<size_t>(idx) < simuToMcRtcIdx_.size())
       {
-          simuIndices.push_back(simuToMcRtcIdx_[idx]);
+          simuIndices.push_back(simuToMcRtcIdx_[size_t(idx)]);
       }
       else
       {

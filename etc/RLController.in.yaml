@@ -36,7 +36,6 @@ ObserverPipelines:
     - type: Encoder
       config:
           velocity: encoderVelocities
-    # Will only be used if H1
     - type: Tilt
       required: true
       update: true
@@ -49,12 +48,6 @@ ObserverPipelines:
           finalAlpha: 2
           finalBeta: 2
           finalGamma: 1
-    # Will only be used if not H1
-    - type: BodySensor
-      update: true
-      gui: true
-      config:
-        bodySensor: FloatingBase
 
 # Transition from initial state to RL execution
 transitions:
@@ -62,53 +55,13 @@ transitions:
 - [RL_State, OK, RL_State, Strict]
 
 init: RL_State
-
-Robot:
-  H1:  
-    mc_rtc_joints_order: [
-      "left_hip_yaw_joint",      
-      "left_hip_roll_joint",       
-      "left_hip_pitch_joint",    
-      "left_knee_joint",         
-      "left_ankle_joint",        
-      "right_hip_yaw_joint",     
-      "right_hip_roll_joint",    
-      "right_hip_pitch_joint",   
-      "right_knee_joint",        
-      "right_ankle_joint",       
-      "torso_joint",             
-      "left_shoulder_pitch_joint",  
-      "left_shoulder_roll_joint",     
-      "left_shoulder_yaw_joint",    
-      "left_elbow_joint",           
-      "right_shoulder_pitch_joint", 
-      "right_shoulder_roll_joint",  
-      "right_shoulder_yaw_joint",   
-      "right_elbow_joint"           
-    ]
-  Go2:
-    mc_rtc_joints_order: [
-      "FR_hip_joint",
-      "FR_thigh_joint",
-      "FR_calf_joint",
-      "FL_hip_joint",
-      "FL_thigh_joint",
-      "FL_calf_joint",
-      "RR_hip_joint",
-      "RR_thigh_joint",
-      "RR_calf_joint",
-      "RL_hip_joint",
-      "RL_thigh_joint",
-      "RL_calf_joint"
-    ]
-
-
-policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx", "go2.onnx"]  # Path to the RL policy file(s)
-default_policy_index: 3 # Index of the default policy to use
+ 
+policy_path: ["standing_h1.onnx", "walking_better_h1.onnx"]  # Path to the RL policy file(s)
+default_policy_index: 1 # Index of the default policy to use
 policies:
-  # index 0 : standing_policy
-  - robot_name: "H1"
-    is_torque_control: false
+  # index 0 : standing policy
+  - robot_name: "h1"
+    is_torque_control: true
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
@@ -154,60 +107,12 @@ policies:
         right_shoulder_yaw_joint: 5.0
         right_elbow_joint: 5.0
   # index 1 : walking_policy
-  - robot_name: "H1"
-    is_torque_control: false
+  - robot_name: "h1"
+    is_torque_control: true
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
     pd_gains_ratio: 1.0
-    kp:
-        left_hip_yaw_joint: 100.0
-        left_hip_roll_joint: 100.0
-        left_hip_pitch_joint: 100.0
-        left_knee_joint: 100.0
-        left_ankle_joint: 20.0
-        right_hip_yaw_joint: 100.0
-        right_hip_roll_joint: 100.0
-        right_hip_pitch_joint: 100.0
-        right_knee_joint: 100.0
-        right_ankle_joint: 20.0
-        torso_joint: 100.0
-        left_shoulder_pitch_joint: 100.0
-        left_shoulder_roll_joint: 100.0
-        left_shoulder_yaw_joint: 100.0
-        left_elbow_joint: 100.0
-        right_shoulder_pitch_joint: 100.0
-        right_shoulder_roll_joint: 100.0
-        right_shoulder_yaw_joint: 100.0
-        right_elbow_joint: 100.0
-    kd:
-        left_hip_yaw_joint: 10.0
-        left_hip_roll_joint: 10.0
-        left_hip_pitch_joint: 10.0
-        left_knee_joint: 10.0
-        left_ankle_joint: 4.0
-        right_hip_yaw_joint: 10.0
-        right_hip_roll_joint: 10.0
-        right_hip_pitch_joint: 10.0
-        right_knee_joint: 10.0
-        right_ankle_joint: 4.0
-        torso_joint: 10.0
-        left_shoulder_pitch_joint: 5.0
-        left_shoulder_roll_joint: 5.0
-        left_shoulder_yaw_joint: 5.0
-        left_elbow_joint: 5.0
-        right_shoulder_pitch_joint: 5.0
-        right_shoulder_roll_joint: 5.0
-        right_shoulder_yaw_joint: 5.0
-        right_elbow_joint: 5.0
-    speed_multiplier_joystick: 0.4
-  # index 2 : better walking policy
-  - robot_name: "H1"
-    is_torque_control: false
-    use_QP: true
-    simulator: "Maniskill"
-    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
-    pd_gains_ratio: 0.9
     kp:
         left_hip_yaw_joint: 200.0
         left_hip_roll_joint: 200.0
@@ -249,44 +154,3 @@ policies:
         right_shoulder_yaw_joint: 5.0
         right_elbow_joint: 5.0
     speed_multiplier_joystick: 0.4
-  # index 3 : Go2 walking policy
-  - robot_name: "Go2"
-    is_torque_control: false
-    use_QP: true
-    simulator: "IsaacLab"
-    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] #all
-    pd_gains_ratio: 1.0
-    kp:
-        FR_hip_joint : 25.0
-        FR_thigh_joint: 25.0
-        FR_calf_joint: 25.0
-        FL_hip_joint: 25.0
-        FL_thigh_joint: 25.0
-        FL_calf_joint: 25.0
-        RR_hip_joint: 25.0
-        RR_thigh_joint: 25.0
-        RR_calf_joint: 25.0
-        RL_hip_joint: 25.0
-        RL_thigh_joint: 25.0
-        RL_calf_joint: 25.0
-    kd:
-        FR_hip_joint : 0.5
-        FR_thigh_joint: 0.5
-        FR_calf_joint: 0.5
-        FL_hip_joint: 0.5
-        FL_thigh_joint: 0.5
-        FL_calf_joint: 0.5
-        RR_hip_joint: 0.5
-        RR_thigh_joint: 0.5
-        RR_calf_joint: 0.5
-        RL_hip_joint: 0.5
-        RL_thigh_joint: 0.5
-        RL_calf_joint: 0.5
-    speed_multiplier_joystick: 0.4
-    action_scale: 0.25
-    policy_period_ms: 20.0
-
-use_async_inference: false
-
-log_timing: true
-timing_log_interval: 100

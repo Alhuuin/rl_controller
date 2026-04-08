@@ -12,8 +12,8 @@ public:
     PolicySimulatorHandling(const std::string& simulator_name, const std::string& robot_name);
     ~PolicySimulatorHandling();
   
-    Eigen::VectorXd reorderJointsToSimulator(const Eigen::VectorXd & obs, std::size_t dofNumber);
-    Eigen::VectorXd reorderJointsFromSimulator(const Eigen::VectorXd & action, std::size_t dofNumber);
+    Eigen::VectorXd reorderJointsToSimulator(const Eigen::VectorXd & obs, int dofNumber);
+    Eigen::VectorXd reorderJointsFromSimulator(const Eigen::VectorXd & action, int dofNumber);
     std::vector<int> invertMapping(const std::vector<int>& jointsMap);
     std::vector<int> getSimulatorIndices(std::vector<int> mcRtcIndices) const;
 
