@@ -26,12 +26,14 @@ mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & c
   mc_rtc::Configuration modifiedConfig = config;
   std::string mainRobot = config("MainRobot", std::string(""));
   mc_rtc::log::info("[RLController] MainRobot detected: '{}'", mainRobot);
+
+  const int policyIndex = config("default_policy_index", 0); // Using a local value since member will be overwritten later during initialization.
+  const bool useResidual = config("policies")[policyIndex]("use_residual", false);
   
-  // Add ExternalForcesEstimator plugin for H1
-  if(mainRobot == "H1")
+  // Add ExternalForcesEstimator plugin for humanoids
+  if(useResidual)
   {
-    // Remove BodySensor observer if H1, keeping Tilt
-    configureObservers("BodySensor", modifiedConfig);
+    // configureObservers("BodySensor", modifiedConfig);
     bool hasPlugin = false;
     if(modifiedConfig.has("Plugins"))
     {
@@ -61,7 +63,7 @@ mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & c
         mc_rtc::Configuration newPlugins;
         newPlugins.loadData(arrayJson);
         modifiedConfig.add("Plugins", newPlugins);
-        mc_rtc::log::info("[RLController] Added ExternalForcesEstimator to existing plugins for H1");
+        mc_rtc::log::info("[RLController] Added ExternalForcesEstimator to existing plugins for humanoids");
       }
     }
     else
@@ -69,12 +71,12 @@ mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & c
       mc_rtc::Configuration plugins;
       plugins.loadData("[\"ExternalForcesEstimator\"]");
       modifiedConfig.add("Plugins", plugins);
-      mc_rtc::log::info("[RLController] Added ExternalForcesEstimator plugin for H1");
+      mc_rtc::log::info("[RLController] Added ExternalForcesEstimator plugin for humanoids");
     }
   }
   else
   {
-    // Remove Tilt observer if not H1, keeping BodySensor
+    // Remove Tilt observer if not using residuals, keeping BodySensor
     configureObservers("Tilt", modifiedConfig);
   }
   
@@ -115,7 +117,6 @@ void RLController::configureObservers(const std::string &observerName, mc_rtc::C
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config)
 : mc_control::fsm::Controller(rm, dt, adjustConfig(config), Backend::TVM)
 {
-  currentPolicyIndex = config("default_policy_index", 0);
   loadConfig(config);
 
   //Initialize Constraints
@@ -148,11 +149,14 @@ bool RLController::run()
     RLuseKeyboardInputs();
   
   counter += timeStep;
-  if(robotName == "H1")
+  if (useResidual)
   {
-    leftAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("left_ankle_link")].translation();
-    rightAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("right_ankle_link")].translation();
-    ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+    if(robotName == "H1")
+    {
+      leftAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("left_ankle_link")].translation();
+      rightAnklePos = robot().mbc().bodyPosW[robot().bodyIndexByName("right_ankle_link")].translation();
+      ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+    }
   }
   auto & real_robot = realRobot(robots()[0].name());
 
@@ -161,10 +165,13 @@ bool RLController::run()
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
   Eigen::MatrixXd Kp_inv = (pd_gains_ratio * kp_vector).cwiseInverse().asDiagonal();
-  if (robotName == "H1")
+  if (useResidual)
   {
-    auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-    auto tau_ext = extTorqueSensor.torques();
+    if (robotName == "H1")
+    {
+      auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+      auto tau_ext = extTorqueSensor.torques();
+    }
   }
   bool run = mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
   robot().forwardKinematics();
@@ -291,11 +298,25 @@ void RLController::RLuseKeyboardInputs()
 
 void RLController::loadConfig(const mc_rtc::Configuration & config)
 { 
+  currentPolicyIndex = config("default_policy_index", 0);
+
   // Load policy paths from config
   policyPaths = config("policy_path", std::vector<std::string>{"walking_better_h1.onnx"});
 
   logTiming_ = config("log_timing");
   timingLogInterval_ = config("timing_log_interval");
+  useResidual = config("policies")[currentPolicyIndex]("use_residual", false);
+  mc_rtc::log::warning(useResidual ? "Using residuals in the controller" : "Not using residuals in the controller");
+  if (useResidual)
+  {
+    residualGroundContactPoints = config(robotName)("residual_ground_contact_points", std::vector<std::string>{});
+     mc_rtc::log::info("Using residuals with ground contact points:");
+    for (const auto & el : residualGroundContactPoints)
+    {
+      mc_rtc::log::warning(el);
+    }
+  }
+  useForceSensors = config("policies")[currentPolicyIndex]("use_force_sensors", false);
   useQP = config("policies")[currentPolicyIndex]("use_QP", true);
   isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
   if(isTorqueControl)
@@ -324,6 +345,12 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   currentPolicyIndex = policyIndex;
   
   // Update policy-specific boolean flags
+  useResidual = config("policies")[currentPolicyIndex]("use_residual", false);
+  if (useResidual)
+  {
+    residualGroundContactPoints = config(robotName)("residual_ground_contact_points", std::vector<std::string>{});
+  }
+  useForceSensors = config("policies")[currentPolicyIndex]("use_force_sensors", false);
   useQP = config("policies")[currentPolicyIndex]("use_QP", true);
   isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
   if(isTorqueControl) datastore().get<std::string>("ControlMode") = "Torque";
@@ -423,10 +450,13 @@ void RLController::computeInversePD()
   Eigen::VectorXd Cg_w_floatingBase = fd.C();
 
   Eigen::VectorXd extTorques = Eigen::VectorXd::Zero(robot().mb().nrDof());
-  if (robotName == "H1")
+  if (useResidual)
   {
-    auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-    extTorques = extTorqueSensor.torques();
+    if (robotName == "H1")
+    {
+      auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
+      extTorques = extTorqueSensor.torques();
+    }
   }
   Eigen::VectorXd tau_cmd_w_floatingBase = M_w_floatingBase*ddot_qp_w_floatingBase + Cg_w_floatingBase - extTorques;
   tau_cmd = tau_cmd_w_floatingBase.tail(dofNumber);
@@ -452,7 +482,7 @@ void RLController::computeRLStateSimulated()
   Eigen::VectorXd Cg_w_floatingBase = fd.C();
 
   Eigen::VectorXd extTorques = Eigen::VectorXd::Zero(robot().mb().nrDof());
-  if (robotName == "H1")
+  if (useResidual)
   {
     auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
     extTorques = extTorqueSensor.torques();
@@ -665,11 +695,14 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
 
   auto & real_robot = realRobot(robots()[0].name());
 
-  if(robotName == "H1")
+  if (useResidual)
   {
-    leftAnklePos = real_robot.collisionTransform("left_ankle_link").translation();
-    rightAnklePos = real_robot.collisionTransform("right_ankle_link").translation();
-    ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+    if(robotName == "H1")
+    {
+      leftAnklePos = real_robot.collisionTransform("left_ankle_link").translation();
+      rightAnklePos = real_robot.collisionTransform("right_ankle_link").translation();
+      ankleDistanceNorm = (leftAnklePos - rightAnklePos).norm();
+    }
   }
   jointLimitsHardPos_upper = Eigen::VectorXd::Zero(dofNumber);
   jointLimitsHardPos_lower = Eigen::VectorXd::Zero(dofNumber);
@@ -755,9 +788,9 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
   current_kp = kp_vector;
   current_kd = kd_vector;
   solver().removeTask(FSMPostureTask);
-  if(!datastore().has("anchorFrameFunction") && robotName == "H1")
+  if(!datastore().has("anchorFrameFunction") && useResidual)
   {
-    datastore().make_call("anchorFrameFunction", [this](const mc_rbdyn::Robot & real_robot) {return createContactAnchor(real_robot);});
+    datastore().make_call("anchorFrameFunction", [this, &config](const mc_rbdyn::Robot & real_robot) {return createContactAnchor(real_robot, config);});
   }
 
   // State after QP without any modification
@@ -895,7 +928,6 @@ void RLController::configRL(const mc_rtc::Configuration & config)
     }
     jointsStr += "]";
     mc_rtc::log::info("Using custom used joints: {}", jointsStr);
-
   }
   else {
     mc_rtc::log::info("No custom used joints specified, using default all joints");
@@ -983,7 +1015,7 @@ void RLController::initializeState()
   tasksComputation(q_rl);
 }
 
-std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(const mc_rbdyn::Robot & anchorRobot)
+std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(const mc_rbdyn::Robot & anchorRobot, const mc_rtc::Configuration & config)
 {
   sva::PTransformd X_foot_r = anchorRobot.bodyPosW("right_ankle_link");
   sva::PTransformd X_foot_l = anchorRobot.bodyPosW("left_ankle_link");

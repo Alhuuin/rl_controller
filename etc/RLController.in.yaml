@@ -36,7 +36,15 @@ ObserverPipelines:
     - type: Encoder
       config:
           velocity: encoderVelocities
-    # Will only be used if H1
+    # - type: BodySensor
+    #   update: true
+    #   gui: true
+    #   config:
+    #     bodySensor: FloatingBase
+    # - type: KinematicInertial
+    #   update: true
+    #   gui: true
+    # Will only be used if residuals used
     - type: Tilt
       required: true
       update: true
@@ -49,12 +57,6 @@ ObserverPipelines:
           finalAlpha: 2
           finalBeta: 2
           finalGamma: 1
-    # Will only be used if not H1
-    - type: BodySensor
-      update: true
-      gui: true
-      config:
-        bodySensor: FloatingBase
 
 # Transition from initial state to RL execution
 transitions:
@@ -86,6 +88,11 @@ Robot:
       "right_shoulder_yaw_joint",   
       "right_elbow_joint"           
     ]
+    residuals_ground_contact_points: [
+      "left_ankle_link",
+      "right_ankle_link"
+    ]
+    knees_index : [3, 8]
   Go2:
     mc_rtc_joints_order: [
       "FR_hip_joint",
@@ -101,10 +108,69 @@ Robot:
       "RL_thigh_joint",
       "RL_calf_joint"
     ]
+  HRP5P:
+    mc_rtc_joints_order: [
+      "RCY",
+      "RCR",
+      "RCP",
+      "RKP",
+      "RAP",
+      "RAR",
+      "LCY",
+      "LCR",
+      "LCP",
+      "LKP",
+      "LAP",
+      "LAR",
+      "WP",
+      "WR",
+      "WY",
+      "HY",
+      "HP",
+      "RSC",
+      "RSP",
+      "RSR",
+      "RSY",
+      "REP",
+      "RWRY",
+      "RWRR",
+      "RWRP",
+      "RHDY",
+      "RTMP",
+      "RTPIP",
+      "RTDIP",
+      "RIMP",
+      "RIPIP",
+      "RIDIP",
+      "RMMP",
+      "RMPIP",
+      "RMDIP",
+      "LSC",
+      "LSP",
+      "LSR",
+      "LSY",
+      "LEP",
+      "LWRY",
+      "LWRR",
+      "LWRP",
+      "LHDY",
+      "LTMP",
+      "LTPIP",
+      "LTDIP",
+      "LIMP",
+      "LIPIP",
+      "LIDIP",
+      "LMMP",
+      "LMPIP",
+      "LMDIP",
+    ]
+    force_sensors: [
+      "LeftFootForceSensor",
+      "RightFootForceSensor"
+    ]
 
-
-policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx", "go2.onnx"]  # Path to the RL policy file(s)
-default_policy_index: 3 # Index of the default policy to use
+policy_path: ["standing_h1.onnx", "walking_h1.onnx", "walking_better_h1.onnx", "go2.onnx", "hrp5p.onnx"]  # Path to the RL policy file(s)
+default_policy_index: 2 # Index of the default policy to use
 policies:
   # index 0 : standing_policy
   - robot_name: "H1"
@@ -112,6 +178,8 @@ policies:
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
+    use_residual: true
+    use_force_sensors: false
     pd_gains_ratio: 1.0
     kp:
         left_hip_yaw_joint: 100.0
@@ -159,6 +227,8 @@ policies:
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
+    use_residual: true
+    use_force_sensors: false
     pd_gains_ratio: 1.0
     kp:
         left_hip_yaw_joint: 100.0
@@ -203,10 +273,12 @@ policies:
     speed_multiplier_joystick: 0.4
   # index 2 : better walking policy
   - robot_name: "H1"
-    is_torque_control: false
+    is_torque_control: true
     use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
+    use_residual: true
+    use_force_sensors: false
     pd_gains_ratio: 0.9
     kp:
         left_hip_yaw_joint: 200.0
@@ -255,6 +327,8 @@ policies:
     use_QP: true
     simulator: "IsaacLab"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] #all
+    use_residual: false
+    use_force_sensors: false
     pd_gains_ratio: 1.0
     kp:
         FR_hip_joint : 25.0
@@ -285,6 +359,123 @@ policies:
     speed_multiplier_joystick: 0.4
     action_scale: 0.25
     policy_period_ms: 20.0
+  # index 4 : HRP5P walking policy
+  - robot_name: "HRP5P"
+    is_torque_control: false
+    use_QP: true
+    simulator: "custom_rohan"
+    used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] #legs
+    use_residual: false
+    use_force_sensors: true
+    pd_gains_ratio: 1.0
+    kp:
+        RCY: 200.0
+        RCR: 150.0
+        RCP: 200.0
+        RKP: 150.0
+        RAP: 80.0
+        RAR: 80.0
+        LCY: 200.0
+        LCR: 150.0
+        LCP: 200.0
+        LKP: 150.0
+        LAP: 80.0
+        LAR: 80.0 
+        WP: 80.0
+        WR: 80.0
+        WY: 80.0
+        HY: 13.0
+        HP: 13.0
+        RSC: 32.0
+        RSP: 32.0
+        RSR: 55.0
+        RSY: 15.0
+        REP: 90.0
+        RWRY: 14.0
+        RWRR: 14.0
+        RWRP: 15.0
+        RHDY: 7.0
+        RTMP: 7.0
+        RTPIP: 7.0
+        RTDIP: 7.0
+        RIMP: 7.0
+        RIPIP: 7.0
+        RIDIP: 7.0
+        RMMP: 7.0
+        RMPIP: 7.0
+        RMDIP: 7.0
+        LSC: 32.0
+        LSP: 32.0
+        LSR: 55.0
+        LSY: 15.0
+        LEP: 90.0
+        LWRY: 14.0
+        LWRR: 14.0
+        LWRP: 15.0
+        LHDY: 7.0
+        LTMP: 7.0
+        LTPIP: 7.0
+        LTDIP: 7.0
+        LIMP: 7.0
+        LIPIP: 7.0
+        LIDIP: 7.0
+        LMMP: 7.0
+        LMPIP: 7.0
+        LMDIP: 7.0
+    kd:
+        RCY: 20.0
+        RCR: 15.0
+        RCP: 20.0
+        RKP: 15.0
+        RAP: 8.0
+        RAR: 8.0
+        LCY: 20.0
+        LCR: 15.0
+        LCP: 20.0
+        LKP: 15.0
+        LAP: 8.0
+        LAR: 8.0 
+        WP: 8.0
+        WR: 8.0
+        WY: 8.0
+        HY: 3.0
+        HP: 3.0
+        RSC: 3.2
+        RSP: 3.2
+        RSR: 5.5
+        RSY: 1.5
+        REP: 9.0
+        RWRY: 1.4
+        RWRR: 1.4
+        RWRP: 1.5
+        RHDY: 0.7
+        RTMP: 0.7
+        RTPIP: 0.7
+        RTDIP: 0.7
+        RIMP: 0.7
+        RIPIP: 0.7
+        RIDIP: 0.7
+        RMMP: 0.7
+        RMPIP: 0.7
+        RMDIP: 0.7
+        LSC: 3.2
+        LSP: 3.2
+        LSR: 5.5
+        LSY: 1.5
+        LEP: 9.0
+        LWRY: 1.4
+        LWRR: 1.4
+        LWRP: 1.5
+        LHDY: 0.7
+        LTMP: 0.7
+        LTPIP: 0.7
+        LTDIP: 0.7
+        LIMP: 0.7
+        LIPIP: 0.7
+        LIDIP: 0.7
+        LMMP: 0.7
+        LMPIP: 0.7
+        LMDIP: 0.7
 
 use_async_inference: false
 

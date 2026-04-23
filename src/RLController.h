@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <vector>
+#include <set>
 
 struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
 {
@@ -49,7 +50,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   std::tuple<Eigen::VectorXd, Eigen::VectorXd> getPDGains();
   bool setPDGains(Eigen::VectorXd p_vec, Eigen::VectorXd d_vec);
   bool gainsUpdateRequired(double tol = 1e-9);
-  std::pair<sva::PTransformd, Eigen::Vector3d>  createContactAnchor(const mc_rbdyn::Robot & anchorRobot);
+  std::pair<sva::PTransformd, Eigen::Vector3d>  createContactAnchor(const mc_rbdyn::Robot & anchorRobot, const mc_rtc::Configuration & config);
 
   void computeRLStateSimulated(); // Compute the state of the robot as if it was simulated with the RL policy
 
@@ -59,6 +60,9 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   std::map<std::string, std::vector<double>> torque_target; // Target torques for the torque task;
   bool useQP = true;
   bool isTorqueControl = false;
+  bool useResidual = false;
+  std::vector<std::string> residualGroundContactPoints; // Ground contact points to use for the residual, in the order of the robot's joints
+  bool useForceSensors = false;
   double pd_gains_ratio = 1.0;
   double actionScale;
   double policyPeriodMs;

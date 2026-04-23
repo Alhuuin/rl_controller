@@ -28,6 +28,11 @@ PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_na
       mcRtcToSimuIdx_ = {3, 0, 9, 6, 4, 1, 10, 7, 5, 2, 11, 8};
       simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
   }
+  else if (robot_name == "HRP5P" && simulator_name == "custom_rohan")
+  {
+    mcRtcToSimuIdx_ = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
+  }
   else {
       mc_rtc::log::error_and_throw("Unsupported simulator or robot: {} with {}, please specify a mc_rtc to simulator joint order mapping in PolicySimulatorHandling.h", simulator_name, robot_name);
   }

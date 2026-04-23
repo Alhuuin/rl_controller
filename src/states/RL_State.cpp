@@ -8,11 +8,11 @@ void RL_State::configure(const mc_rtc::Configuration & config)
 void RL_State::start(mc_control::fsm::Controller & ctl_)
 {
   auto & ctl = static_cast<RLController&>(ctl_);
-  if(!ctl.datastore().has("EF_Estimator::isActive") && ctl.robotName == "H1")
+  if(!ctl.datastore().has("EF_Estimator::isActive") && ctl.useResidual)
   {
     mc_rtc::log::error_and_throw("[RL_State] EF_Estimator not found in datastore. Please enable ExternalForcesEstimator plugin");
   }
-  if (ctl.robotName == "H1" && !ctl.datastore().call<bool>("EF_Estimator::isActive")) {
+  if (ctl.useResidual && !ctl.datastore().call<bool>("EF_Estimator::isActive")) {
     ctl.datastore().call("EF_Estimator::toggleActive");
   }
   ctl.utils_.start_rl_state(ctl, "RL_State");

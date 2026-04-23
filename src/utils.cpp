@@ -402,6 +402,11 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
       obs.segment(36, 12) = ctl.legAction;
       break;
     }
+    case 4 :
+    {
+      obs.segment(0,49) = Eigen::VectorXd::Zero(49);
+      break;
+    }
     default:
     {
       mc_rtc::log::error("Unknown policy index: {}", ctl.currentPolicyIndex);
