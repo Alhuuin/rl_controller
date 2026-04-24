@@ -61,7 +61,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   bool useQP = true;
   bool isTorqueControl = false;
   bool useResidual = false;
-  std::vector<std::string> residualGroundContactPoints; // Ground contact points to use for the residual, in the order of the robot's joints
+  std::vector<std::string> anchorLinks = {}; // Ground contact points to use for the residual, in the order of the robot's joints
   bool useForceSensors = false;
   double pd_gains_ratio = 1.0;
   double actionScale;
@@ -162,6 +162,10 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   Eigen::Vector3d leftAnklePos; 
   Eigen::Vector3d rightAnklePos;
   double ankleDistanceNorm;
+  std::vector<std::string> feetForceSensors = {};
+  std::vector<Eigen::Vector3d> feetForces; // Ground reaction forces for the feet, in the order of FeetForceSensors
+  double oneFootForceRatio = 0.5;
+  double minFootForceForAnchor = 20.0;
 
   double velPercent = 0.9;
   double dsPercent = 0.01;
