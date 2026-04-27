@@ -164,8 +164,11 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
   double ankleDistanceNorm;
   std::vector<std::string> feetForceSensors = {};
   std::vector<Eigen::Vector3d> feetForces; // Ground reaction forces for the feet, in the order of FeetForceSensors
+  std::vector<std::string> residualAnchorWeightJoints = {}; // Joints used to weight anchor points from residual torques
+  std::vector<int> residualAnchorWeightJointIndices = {}; // Indices in external torque vector matching residualAnchorWeightJoints
   double oneFootForceRatio = 0.5;
-  double minFootForceForAnchor = 20.0;
+  double minResidualTorqueForAnchor = 0.02;
+  double minFootForceForAnchor = 15.0;
 
   double velPercent = 0.9;
   double dsPercent = 0.01;

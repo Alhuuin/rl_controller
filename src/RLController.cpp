@@ -10,6 +10,7 @@
 #include <mc_rtc/logging.h>
 #include <mc_rbdyn/configuration_io.h>
 #include <mc_joystick_plugin/joystick_inputs.h>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -19,100 +20,6 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
-
-
-// mc_rtc::Configuration RLController::adjustConfig(const mc_rtc::Configuration & config)
-// {
-//   mc_rtc::Configuration modifiedConfig = config;
-//   std::string mainRobot = config("MainRobot", std::string(""));
-//   mc_rtc::log::info("[RLController] MainRobot detected: '{}'", mainRobot);
-
-//   const int policyIndex = config("default_policy_index", 0); // Using a local value since member will be overwritten later during initialization.
-//   const bool useResidual = config("policies")[policyIndex]("use_residual", false);
-  
-//   // Add ExternalForcesEstimator plugin for humanoids
-//   if(useResidual)
-//   {
-//     // configureObservers("BodySensor", modifiedConfig);
-//     bool hasPlugin = false;
-//     if(modifiedConfig.has("Plugins"))
-//     {
-//       auto plugins = modifiedConfig("Plugins");
-//       for(size_t i = 0; i < plugins.size(); ++i)
-//       {
-//         std::string pluginName = plugins[i];
-//         if(pluginName == "ExternalForcesEstimator")
-//         {
-//           hasPlugin = true;
-//           break;
-//         }
-//       }
-//       if(!hasPlugin)
-//       {
-//         std::vector<std::string> pluginJsons;
-//         for(size_t i = 0; i < plugins.size(); ++i)
-//         {
-//           pluginJsons.push_back("\"" + static_cast<std::string>(plugins[i]) + "\"");
-//         }
-//         pluginJsons.push_back("\"ExternalForcesEstimator\"");
-        
-//         std::string arrayJson = "[" + std::accumulate(pluginJsons.begin(), pluginJsons.end(), std::string(),
-//           [](const std::string& a, const std::string& b) -> std::string {
-//             return a.empty() ? b : a + "," + b;
-//           }) + "]";
-//         mc_rtc::Configuration newPlugins;
-//         newPlugins.loadData(arrayJson);
-//         modifiedConfig.add("Plugins", newPlugins);
-//         mc_rtc::log::info("[RLController] Added ExternalForcesEstimator to existing plugins for humanoids");
-//       }
-//     }
-//     else
-//     {
-//       mc_rtc::Configuration plugins;
-//       plugins.loadData("[\"ExternalForcesEstimator\"]");
-//       modifiedConfig.add("Plugins", plugins);
-//       mc_rtc::log::info("[RLController] Added ExternalForcesEstimator plugin for humanoids");
-//     }
-//   }
-//   else
-//   {
-//     // Remove Tilt observer if not using residuals, keeping BodySensor
-//     configureObservers("Tilt", modifiedConfig);
-//   }
-  
-//   return modifiedConfig;
-// }
-
-// void RLController::configureObservers(const std::string &observerName, mc_rtc::Configuration & modifiedConfig)
-// {
-//   if(!modifiedConfig.has("ObserverPipelines")) return;
-//   auto observerPipeline = modifiedConfig("ObserverPipelines");
-//   if(!observerPipeline.has("observers")) return;
-  
-//   auto observers = observerPipeline("observers");
-//   std::vector<std::string> observerJsons;
-//   observerJsons.reserve(observers.size());
-  
-//   for(size_t i = 0; i < observers.size(); ++i)
-//   {
-//     auto obs = observers[i];
-//     if(obs.has("type"))
-//     {
-//       std::string obsType = obs("type");
-//       if(obsType != observerName)
-//       {
-//         observerJsons.push_back(obs.dump(false, false));
-//       }
-//     }
-//   } 
-//   std::string arrayJson = "[" + std::accumulate(observerJsons.begin(), observerJsons.end(), std::string(),
-//     [](const std::string& a, const std::string& b) -> std::string {
-//       return a.empty() ? b : a + "," + b;
-//     }) + "]";
-//   mc_rtc::Configuration newObservers;
-//   newObservers.loadData(arrayJson);
-//   modifiedConfig("ObserverPipelines").add("observers", newObservers);
-// }
 
 RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc::Configuration & config)
 : mc_control::fsm::Controller(rm, dt, config, Backend::TVM)
@@ -309,6 +216,9 @@ void RLController::loadConfig(const mc_rtc::Configuration & config)
   useQP = config("policies")[currentPolicyIndex]("use_QP", true); 
   useForceSensors = config("policies")[currentPolicyIndex]("use_force_sensors", false);
   useResidual = config("policies")[currentPolicyIndex]("use_residual", false);
+  anchorLinks.clear();
+  residualAnchorWeightJoints.clear();
+  residualAnchorWeightJointIndices.clear();
   if (useForceSensors)
   {
     feetForceSensors = config("Robot")(robotName)("force_sensors");
@@ -324,9 +234,38 @@ void RLController::loadConfig(const mc_rtc::Configuration & config)
     }
   }
   if (useResidual)
+  {
     const auto & confAnchorLinks = config("Robot")(robotName)("residual_ground_contact_points", std::vector<std::string>{});
-  // if (confAnchorLinks.size() != 0)
-  //   anchorLinks = confAnchorLinks;
+    if(!confAnchorLinks.empty())
+    {
+      anchorLinks = confAnchorLinks;
+    }
+
+    residualAnchorWeightJoints = config("Robot")(robotName)("residual_anchor_weight_joints", std::vector<std::string>{});
+    if(residualAnchorWeightJoints.empty() && anchorLinks.size() == 2)
+    {
+      residualAnchorWeightJoints = {"right_knee_joint", "left_knee_joint"};
+    }
+
+    residualAnchorWeightJointIndices.reserve(residualAnchorWeightJoints.size());
+    for(const auto & jointName : residualAnchorWeightJoints)
+    {
+      const int jointIndex = robot().jointIndexByName(jointName);
+      if(jointIndex < 0)
+      {
+        mc_rtc::log::warning("[RLController] residual_anchor_weight_joints contains unknown joint {}", jointName);
+        continue;
+      }
+      residualAnchorWeightJointIndices.push_back(jointIndex + 5);
+    }
+
+    if(!residualAnchorWeightJointIndices.empty() && residualAnchorWeightJointIndices.size() < anchorLinks.size())
+    {
+      mc_rtc::log::warning(
+          "[RLController] residual_anchor_weight_joints has {} entries, but anchorLinks has {}. Falling back to geometric averaging for missing weights.",
+          residualAnchorWeightJointIndices.size(), anchorLinks.size());
+    }
+  }
   isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
   if(isTorqueControl)
   {
@@ -356,8 +295,10 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   
   // Update policy-specific boolean flags
   useResidual = config("policies")[currentPolicyIndex]("use_residual", false);
-  // anchorLinks = config(robotName)("residual_ground_contact_points", std::vector<std::string>{});
   useForceSensors = config("policies")[currentPolicyIndex]("use_force_sensors", false);
+  anchorLinks.clear();
+  residualAnchorWeightJoints.clear();
+  residualAnchorWeightJointIndices.clear();
   if (useForceSensors)
   {
     feetForceSensors = config("Robot")(robotName)("force_sensors");
@@ -373,7 +314,38 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
     }
   }
   if (useResidual)
+  {
     const auto & confAnchorLinks = config("Robot")(robotName)("residual_ground_contact_points", std::vector<std::string>{});
+    if(!confAnchorLinks.empty())
+    {
+      anchorLinks = confAnchorLinks;
+    }
+
+    residualAnchorWeightJoints = config("Robot")(robotName)("residual_anchor_weight_joints", std::vector<std::string>{});
+    if(residualAnchorWeightJoints.empty() && anchorLinks.size() == 2)
+    {
+      residualAnchorWeightJoints = {"right_knee_joint", "left_knee_joint"};
+    }
+
+    residualAnchorWeightJointIndices.reserve(residualAnchorWeightJoints.size());
+    for(const auto & jointName : residualAnchorWeightJoints)
+    {
+      const int jointIndex = robot().jointIndexByName(jointName);
+      if(jointIndex < 0)
+      {
+        mc_rtc::log::warning("[RLController] residual_anchor_weight_joints contains unknown joint {}", jointName);
+        continue;
+      }
+      residualAnchorWeightJointIndices.push_back(jointIndex + 5);
+    }
+
+    if(!residualAnchorWeightJointIndices.empty() && residualAnchorWeightJointIndices.size() < anchorLinks.size())
+    {
+      mc_rtc::log::warning(
+          "[RLController] residual_anchor_weight_joints has {} entries, but anchorLinks has {}. Falling back to geometric averaging for missing weights.",
+          residualAnchorWeightJointIndices.size(), anchorLinks.size());
+    }
+  }
   useQP = config("policies")[currentPolicyIndex]("use_QP", true);
   isTorqueControl = config("policies")[currentPolicyIndex]("is_torque_control", false);
   if(isTorqueControl) datastore().get<std::string>("ControlMode") = "Torque";
@@ -1041,6 +1013,8 @@ std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(c
 {
   double anchorLeftFootRatio = 0.5;
   bool hasForceBasedRatio = false;
+  bool hasResidualBasedWeights = false;
+  std::vector<double> residualAnchorWeights;
 
   Eigen::Vector3d weightedAnchor = Eigen::Vector3d::Zero();
   Eigen::Vector3d weightedVel = Eigen::Vector3d::Zero();
@@ -1055,11 +1029,6 @@ std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(c
     for(size_t i = 0; i < feetForceSensors.size(); ++i)
     {
       const auto & sensorName = feetForceSensors[i];
-      if(!anchorRobot.hasForceSensor(sensorName))
-      {
-        continue;
-      }
-
       const auto & forceSensor = anchorRobot.forceSensor(sensorName);
       const auto wrench = forceSensor.worldWrenchWithoutGravity(anchorRobot);
       const auto force = wrench.force();
@@ -1082,18 +1051,35 @@ std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(c
   if(!hasForceBasedRatio && useResidual)
   {
     auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-    const int right_knee_index = robot().jointIndexByName("right_knee_joint") + 5;
-    const int left_knee_index = robot().jointIndexByName("left_knee_joint") + 5;
     const auto & extTorques = extTorqueSensor.torques();
-    if(right_knee_index >= 0 && left_knee_index >= 0 && right_knee_index < static_cast<int>(extTorques.size())
-       && left_knee_index < static_cast<int>(extTorques.size()))
+    const size_t weightedContacts = std::min(anchorLinks.size(), residualAnchorWeightJointIndices.size());
+    if(weightedContacts > 0)
     {
-      const double tau_ext_knee_r = std::abs(extTorques[right_knee_index]);
-      const double tau_ext_knee_l = std::abs(extTorques[left_knee_index]);
-      const double totalKneeTorque = tau_ext_knee_r + tau_ext_knee_l;
-      if(totalKneeTorque > 0.02)
+      residualAnchorWeights.assign(weightedContacts, 0.0);
+      double totalResidualTorque = 0.0;
+      for(size_t i = 0; i < weightedContacts; ++i)
       {
-        anchorLeftFootRatio = tau_ext_knee_l / totalKneeTorque;
+        const int jointIndex = residualAnchorWeightJointIndices[i];
+        if(jointIndex < 0 || jointIndex >= static_cast<int>(extTorques.size()))
+        {
+          continue;
+        }
+        const double tauExt = std::abs(extTorques[jointIndex]);
+        residualAnchorWeights[i] = tauExt;
+        totalResidualTorque += tauExt;
+      }
+
+      if(totalResidualTorque > minResidualTorqueForAnchor)
+      {
+        for(auto & w : residualAnchorWeights)
+        {
+          w /= totalResidualTorque;
+        }
+        hasResidualBasedWeights = true;
+        if(residualAnchorWeights.size() == 2)
+        {
+          anchorLeftFootRatio = residualAnchorWeights[1];
+        }
       }
     }
   }
@@ -1110,7 +1096,23 @@ std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(c
   }
 
   if(anchorPositions.empty())
+  {
     mc_rtc::log::warning("[RLController] No anchorLinks available, please specify them in the controller config");
+    return {contact_anchor_tf, Eigen::Vector3d::Zero()};
+  }
+
+  if(hasResidualBasedWeights && residualAnchorWeights.size() == anchorPositions.size())
+  {
+    Eigen::Vector3d contact_anchor = Eigen::Vector3d::Zero();
+    Eigen::Vector3d anchor_vel = Eigen::Vector3d::Zero();
+    for(size_t i = 0; i < anchorPositions.size(); ++i)
+    {
+      contact_anchor += residualAnchorWeights[i] * anchorPositions[i];
+      anchor_vel += residualAnchorWeights[i] * anchorVels[i];
+    }
+    contact_anchor_tf = sva::PTransformd(Eigen::Matrix3d::Identity(), contact_anchor);
+    return {contact_anchor_tf, anchor_vel};
+  }
 
   if(anchorPositions.size() == 2)
   {
