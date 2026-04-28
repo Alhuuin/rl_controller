@@ -8,6 +8,6 @@ includedir=${prefix}/include/onnxruntime
 Name: onnxruntime
 Description: ONNX runtime
 URL: https://github.com/microsoft/onnxruntime
-Version: 1.22.0
+Version: 1.25.1
 Libs: -L${libdir} -lonnxruntime
 Cflags: -I${includedir}

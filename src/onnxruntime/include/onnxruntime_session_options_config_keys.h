@@ -13,7 +13,7 @@
  * The maximum length of the Config Key is 1024
  *
  * The string format of a SessionOptions Config Value is defined individually for each Config.
- * The maximum length of the Config Value is 2048
+ * The maximum length of the Config Value is 8192
  */
 
 // Key for disable PrePacking,
@@ -67,6 +67,10 @@ static const char* const kOrtSessionOptionsEnableQuantQDQCleanup = "session.enab
 // GeluApproximation has side effects which may change the inference results. It is disabled by default due to this.
 static const char* const kOrtSessionOptionsEnableGeluApproximation = "optimization.enable_gelu_approximation";
 
+// Enable or disable Cast chain elimination in graph optimization. "0": disable; "1": enable. The default is "0".
+// CastElimination with chain elimination has side effects which may change the inference results. It is disabled by default due to this.
+static const char* const kOrtSessionOptionsEnableCastChainElimination = "optimization.enable_cast_chain_elimination";
+
 // This setting controls whether to enable AheadOfTime function inlining.
 // AOT function inlining examines the graph and attempts to inline as many locally defined functions in the model
 // as possible with the help of enabled execution providers.
@@ -107,13 +111,46 @@ static const char* const kOrtSessionOptionsMemoryOptimizerProbeConfig = "optimiz
 // Default is an empty string which means no optimizers are disabled.
 static const char* const kOrtSessionOptionsDisableSpecifiedOptimizers = "optimization.disable_specified_optimizers";
 
+// It controls whether to run graph optimizations in loop or not.
+//
+// "0": disable. Graph Optimization Loop is disabled.
+// ```
+// Level 2 --> Level 3 --> InsertCastTransforms --> Level 4
+//   ^                                                 |
+//   |                 "No Loop"                       |
+//   |                                                 |
+//   X                xxxxxxxxxxx                      X
+// ```
+// "1": enable. Graph Optimization Loop is enabled, such that, if optimizations at Level 4 are applied then
+// the loop will check for any other valid optimization that can happen.
+// ```
+// Level 2 --> Level 3 --> InsertCastTransforms --> Level 4
+//   ^                                                 |
+//   |        "Loop only depending on Level 4"         |
+//   |                                                 |
+//   ---------------------------------------------------
+// ```
+// "2": enable. Graph Optimization Loop is enabled, such that, if optimizations at Level 2 or above are applied then
+// The loop will check for any other valid optimization that can happen.
+// ```
+// Level 2 --> Level 3 --> InsertCastTransforms --> Level 4
+//   ^                                                 |
+//   |                    "Loop"                       |
+//   |                                                 |
+//   ---------------------------------------------------
+// ```
+// Default value is set to "1".
+static const char* const kOrtSessionOptionsGraphOptimizationsLoopLevel = "session.graph_optimizations_loop_level";
+
 // Enable or disable using device allocator for allocating initialized tensor memory. "1": enable; "0": disable. The default is "0".
 // Using device allocators means the memory allocation is made using malloc/new.
 static const char* const kOrtSessionOptionsUseDeviceAllocatorForInitializers = "session.use_device_allocator_for_initializers";
 
 // Configure whether to allow the inter_op/intra_op threads spinning a number of times before blocking
 // "0": thread will block if found no job to run
-// "1": default, thread will spin a number of times before blocking
+// "1": thread will spin a number of times before blocking
+// The default is "0" when ORT is built with "ORT_CLIENT_PACKAGE_BUILD" and "1" otherwise.
+// Thread spinning is disabled by default for client/on-device workloads to reduce cpu utilization and improve power efficiency.
 static const char* const kOrtSessionOptionsConfigAllowInterOpSpinning = "session.inter_op.allow_spinning";
 static const char* const kOrtSessionOptionsConfigAllowIntraOpSpinning = "session.intra_op.allow_spinning";
 
@@ -288,12 +325,32 @@ static const char* const kOrtSessionOptionsCollectNodeMemoryStatsToFile = "sessi
 /// This is a composite CSV setting formatted as "memory limit in kb,file name for collected stats"
 /// "limit > 0": enables Capacity Aware Partitioning for Cuda EP. `limit` is optional and when absent
 /// the provider may attempt to figure out the memory available automatically.
+/// The setting with no pre-recorded stats is expected to look like: "limit > 0,".
+/// In this case, the EP will calculate memory using the initializers referenced by the node.
+///   This enables an ad-hoc and flexible scenarios with no pre-recorded stats, but may be less accurate.
 /// The setting with no limit is expected to look like: ",file name for collected stats"
-///  The EP will place nodes on device "file name" :
+/// Finally a setting with both limit and pre-recorded stats absent can contain a single comma: ",".
+///  The EP will attempt to place nodes on device (currently only CUDA is supported) :
 /// this file is expected to be found at the same folder with the model. The file contains
 /// pre-recorded stats collected when running with kOrtSessionOptionsCollectNodeMemoryStatsToFile enforce (see above)
 static const char* const kOrtSessionOptionsResourceCudaPartitioningSettings =
     "session.resource_cuda_partitioning_settings";
+
+/// <summary>
+/// This is a setting that contains string annotations or annotation prefixes to be matched
+/// against individual nodes metadata entry 'layer_ann' to guide layer assignment during partitioning.
+/// The value is a semicolon separated list of strings or string prefixes per device.
+/// Format: device1(annotation1, annotation2, ...); device2(annotation1, =annotation3, ...);...
+/// Where:
+/// - device1, device2, ... are the recognized device names to be matched against EPs configured in
+///   the given session.
+/// - annotation1, annotation2, ... are annotation prefixes to be matched against node annotations. Any
+///   node annotation that starts with one of these prefixes will be matched.
+/// - =annotation3 indicates an exact match for annotation3. Only node annotations that are exactly
+///   equal to 'annotation3' will be matched.
+/// TODO: add a list of recognized devices here.
+/// </summary>
+static const char* const kOrtSessionOptionsLayerAssignmentSettings = "session.layer_assignment_settings";
 
 // Enable EP context feature to dump the partitioned graph which includes the EP context into Onnx file.
 // The dumped Onnx model with EP context can be used for future inference to avoid the EP graph partitioning/compile overhead.
@@ -337,16 +394,40 @@ static const char* const kOrtSessionOptionsEpContextModelExternalInitializersFil
 // - "1": Gemm FastMath mode is enabled.
 static const char* const kOrtSessionOptionsMlasGemmFastMathArm64Bfloat16 = "mlas.enable_gemm_fastmath_arm64_bfloat16";
 
+// Use LUT (Lookup Table) based GEMM for quantized models when available.
+// Option values:
+// - "0": Do not use LUT based GEMM. [DEFAULT]
+// - "1": Use LUT based GEMM when available.
+static const char* const kOrtSessionOptionsMlasLutGemm = "mlas.use_lut_gemm";
+
+// Use KleidiAI kernels in MLAS if available.
+// Option values:
+// - "0": Use KleidiAI kernels when available. [DEFAULT]
+// - "1": Disable KleidiAI kernels even if available.
+static const char* const kOrtSessionOptionsMlasDisableKleidiAi = "mlas.disable_kleidiai";
+
 // When converting DQ + MatMul -> MatMulNBits, the accuracy level of the MatMulNBits is controlled by this option.
 // Refer to MatMulNBits op schema for more details.
 // If not provided, default is 4.
 static const char* const kOrtSessionOptionsQDQMatMulNBitsAccuracyLevel = "session.qdq_matmulnbits_accuracy_level";
 
+// Block size used when converting per-tensor or per-axis DQ + MatMul to MatMulNBits.
+// Only applies to DQ nodes without an existing block_size attribute (i.e., per-tensor or per-axis quantization).
+// Positive value: explicit block_size (must be power-of-2 and >= 16, e.g., 16, 32, 64, 128).
+// "0" or not provided: use default block_size of 32.
+// "-1": heuristic - largest power-of-2 <= min(K, 256) that minimizes padding.
+static const char* const kOrtSessionOptionsQDQMatMulNBitsBlockSize = "session.qdq_matmulnbits_block_size";
+
+// Enable the DQ->MatMulNBits fusion graph transformer.
+// "0": disabled (default). "1": enabled.
+// This is typically set automatically by InferenceSession when the NvTensorRTRTX EP is registered.
+static const char* const kOrtSessionOptionsEnableDQMatMulNBitsFusion = "session.enable_dq_matmulnbits_fusion";
+
 // THIS OPTION IS NOT A REGULAR SESSION OPTION SINCE IT CAN BE MODIFIED AT ANY TIME
 // Meant to be used with SetEpDynamicOptions
 // Specify the type of workload for this session.
-// “Default”: OS determines the scheduling priority and processor performance to service this workload. [Default]
-// “Efficient”: OS treats this workload is efficiency oriented with low scheduling priority and efficient processor performance.
+// "Default": OS determines the scheduling priority and processor performance to service this workload. [Default]
+// "Efficient": OS treats this workload is efficiency oriented with low scheduling priority and efficient processor performance.
 static const char* const kOrtEpDynamicOptionsWorkloadType = "ep.dynamic.workload_type";
 
 // Disables model compilation during session initialization.
@@ -364,3 +445,39 @@ static const char* const kOrtEpDynamicOptionsWorkloadType = "ep.dynamic.workload
 // - "0": EP compile is not disabled. [DEFAULT]
 // - "1": EP compile is disabled.
 static const char* const kOrtSessionOptionsDisableModelCompile = "session.disable_model_compile";
+
+// Controls behavior when compiled model compatibility is SUPPORTED_PREFER_RECOMPILATION.
+// "0": Allow execution with suboptimal performance. [DEFAULT]
+// "1": Fail session creation to require recompilation for optimal performance.
+// Note: UNSUPPORTED models always fail regardless of this setting.
+static const char* const kOrtSessionOptionsFailOnSuboptimalCompiledModel =
+    "session.fail_on_suboptimal_compiled_model";
+
+// THIS OPTION IS NOT A REGULAR SESSION OPTION SINCE IT CAN BE MODIFIED AT ANY TIME
+// Meant to be used with SetEpDynamicOptions
+// options for HTP performance mode: "burst", "balanced", "default", "high_performance",
+// "high_power_saver", "low_balanced", "extreme_power_saver", "low_power_saver", "power_saver",
+// "sustained_high_performance". Default to "default".
+static const char* const kOrtEpDynamicOptionsQnnHtpPerformanceMode = "ep.dynamic.qnn_htp_performance_mode";
+
+// Enables the session to record information about the subgraphs/nodes assigned to execution providers.
+// When enabled, an application may call Session_GetEpGraphAssignmentInfo() to retrieve the information.
+//
+// Option values:
+// - "0": Recording of EP graph assignment information is disabled. [DEFAULT]
+// - "1": Recording of EP graph assignment information is enabled.
+static const char* const kOrtSessionOptionsRecordEpGraphAssignmentInfo = "session.record_ep_graph_assignment_info";
+
+// An application enables this option to request that EPs create compiled models (i.e., EPContext models) with EPContext
+// nodes that do not store model weights internally. Instead, the weights should be provided by ONNX Runtime as
+// explicit inputs to the EPContext nodes.
+//
+// This option is ignored by an EP if "ep.context_enable" is not set to "1".
+//
+// If the weights are originally stored in an external file, this allows multiple models to share the same
+// external weights file.
+//
+// Option values:
+// - "0": disable. (default)
+// - "1": enable.
+static const char* const kOrtSessionOptionEpEnableWeightlessEpContextNodes = "ep.enable_weightless_ep_context_nodes";
