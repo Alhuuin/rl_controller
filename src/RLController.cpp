@@ -138,8 +138,6 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   Eigen::Matrix3d baseRot = real_robot.bodyPosW(baseName).rotation();
   rpy = mc_rbdyn::rpyFromMat(baseRot);
     
-  mc_rtc::log::info("[RLController] Posture target initialized with {} joints", dofNumber); 
-
   // Initialize reference position and last actions for action blending
   int vect_size = int(usedJoints_mcRtcOrder.size());
   a_vector = Eigen::VectorXd::Zero(dofNumber);
@@ -212,8 +210,7 @@ bool RLController::byPassQPControl()
   if(useQP_) return false; // QP is not bypassed, do nothing
   if(!isTorqueControl_)
   {
-    mc_rtc::log::warning("[RLController] QP can't be bypassed in position control mode.");
-    mc_rtc::log::warning("[RLController] QP is enforced.");
+    mc_rtc::log::warning("[RLController] QP can't be bypassed in position control mode. Please enable torque control to bypass QP.");
     return false;
   }
 
