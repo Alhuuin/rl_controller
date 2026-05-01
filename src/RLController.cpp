@@ -35,12 +35,6 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
 
   // Initialize Task
   torqueTask = std::make_shared<mc_tasks::TorqueTask>(solver(), robot().robotIndex());
-  
-  if(useAsyncInference_)
-  {
-    auto & ctl = *this;
-    utils_.startInferenceThread(ctl);
-  }
 
   addGui(config);
   addLog();
@@ -235,17 +229,13 @@ void RLController::loadConfig(const mc_rtc::Configuration & config)
   }
   if (useResidual)
   {
-    const auto & confAnchorLinks = config("Robot")(robotName)("residual_ground_contact_points", std::vector<std::string>{});
+    const auto & confAnchorLinks = config("Robot")(robotName)("anchor_links", std::vector<std::string>{});
     if(!confAnchorLinks.empty())
     {
       anchorLinks = confAnchorLinks;
     }
 
-    residualAnchorWeightJoints = config("Robot")(robotName)("residual_anchor_weight_joints", std::vector<std::string>{});
-    if(residualAnchorWeightJoints.empty() && anchorLinks.size() == 2)
-    {
-      residualAnchorWeightJoints = {"right_knee_joint", "left_knee_joint"};
-    }
+    residualAnchorWeightJoints = config("Robot")(robotName)("knee_joints", std::vector<std::string>{});
 
     residualAnchorWeightJointIndices.reserve(residualAnchorWeightJoints.size());
     for(const auto & jointName : residualAnchorWeightJoints)
@@ -315,17 +305,13 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   }
   if (useResidual)
   {
-    const auto & confAnchorLinks = config("Robot")(robotName)("residual_ground_contact_points", std::vector<std::string>{});
+    const auto & confAnchorLinks = config("Robot")(robotName)("anchor_links", std::vector<std::string>{});
     if(!confAnchorLinks.empty())
     {
       anchorLinks = confAnchorLinks;
     }
 
-    residualAnchorWeightJoints = config("Robot")(robotName)("residual_anchor_weight_joints", std::vector<std::string>{});
-    if(residualAnchorWeightJoints.empty() && anchorLinks.size() == 2)
-    {
-      residualAnchorWeightJoints = {"right_knee_joint", "left_knee_joint"};
-    }
+    residualAnchorWeightJoints = config("Robot")(robotName)("knee_joints", std::vector<std::string>{});
 
     residualAnchorWeightJointIndices.reserve(residualAnchorWeightJoints.size());
     for(const auto & jointName : residualAnchorWeightJoints)
@@ -862,8 +848,6 @@ void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
   mc_rtc::log::info("Reference position initialized with {} joints", q_zero_vector.size());
   q_rl = q_zero_vector;  // Start with reference position
   
-  useAsyncInference_ = config("use_async_inference", true);
-  mc_rtc::log::info("Async RL inference: {}", useAsyncInference_ ? "enabled" : "disabled");
   currentAction_ = Eigen::VectorXd::Zero(dofNumber);
   latestAction_ = Eigen::VectorXd::Zero(dofNumber);
   

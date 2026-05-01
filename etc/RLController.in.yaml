@@ -85,7 +85,10 @@ Robot:
       "left_ankle_link",
       "right_ankle_link"
     ]
-    knees_index : [3, 8]
+    knee_joints : [
+      "left_knee_joint",
+      "right_knee_joint"
+    ]
   Go2:
     mc_rtc_joints_order: [
       "FR_hip_joint",

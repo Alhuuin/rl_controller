@@ -48,44 +48,15 @@ void utils::run_rl_state(mc_control::fsm::Controller & ctl_, std::string state_n
   
   try
   {
-    if(ctl.useAsyncInference_)
+    syncTime_ += ctl.timeStep;
+    syncPhase_ += ctl.timeStep;
+    ctl.phase_ = fmod(syncPhase_ * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
+    if(syncTime_ >= ctl.policyPeriodMs/1000)
     {
-      updateObservationForInference(ctl);
-      action = getLatestAction(ctl);
-      // Apply a new action and log if a new action was applied
-      bool newActionApplied = applyAction(ctl, action);
-      if(newActionApplied)
-      {
-        stepCount_++;
-        if(ctl.logTiming_ && (stepCount_ % ctl.timingLogInterval_ == 0))
-        {
-          auto endTime = std::chrono::high_resolution_clock::now();
-          auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
-          
-          double currentTime = std::chrono::duration<double>(
-            std::chrono::high_resolution_clock::now().time_since_epoch()).count();
-          double avgFreq = static_cast<double>(stepCount_) / (currentTime - startTime_);
-          
-          const char* mode = ctl.useAsyncInference_ ? "async" : "sync";
-          mc_rtc::log::info("{} Step {} ({}): inference time = {} μs, avg policy freq = {:.1f} Hz",
-                            state_name, stepCount_, mode, duration.count(), avgFreq);
-        }
-      }    
-    }
-    else
-    {
-      syncTime_ += ctl.timeStep;
-      syncPhase_ += ctl.timeStep;
-      ctl.phase_ = fmod(syncPhase_ * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
-      if(syncTime_ >= ctl.policyPeriodMs/1000)
-      {
-        // syncTime_ -=ctl.timeStep;
-        // // mc_rtc::log::info("FREQ: {:.1f} Hz", 1.0 / (syncTime_));
-        ctl.currentObservation_ = getCurrentObservation(ctl);
-        ctl.currentAction_ = ctl.rlPolicy_->predict(ctl.currentObservation_);
-        applyAction(ctl, ctl.currentAction_);
-        syncTime_ = 0.0;
-      }
+      ctl.currentObservation_ = getCurrentObservation(ctl);
+      ctl.currentAction_ = ctl.rlPolicy_->predict(ctl.currentObservation_);
+      applyAction(ctl, ctl.currentAction_);
+      syncTime_ = 0.0;
     }
   }
   catch(const std::exception & e)
@@ -240,15 +211,7 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
       }
       obs.segment(25, 10) = ctl.legAction;
 
-      // Addition for walking policy:
       // Phase
-      if(ctl.useAsyncInference_)
-      {
-        auto currentTime = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - ctl.startPhase_);
-        ctl.phase_ = fmod(static_cast<double>(elapsed.count()) * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
-      }
-
       obs(35) = sin(ctl.phase_);
       obs(36) = cos(ctl.phase_);
 
@@ -301,14 +264,6 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
         } else {
           ctl.legAction(i) = ctl.a_simuOrder(idx);
         }
-      }
-
-      // Phase
-      if(ctl.useAsyncInference_)
-      {
-        auto currentTime = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - ctl.startPhase_);
-        ctl.phase_ = fmod(static_cast<double>(elapsed.count()) * 0.001 * ctl.phaseFreq_ * 2.0 * M_PI, 2.0 * M_PI);
       }
       
       obs.segment(0, 3) = ctl.baseAngVel * 0.25;
@@ -404,7 +359,65 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller & ctl_)
     }
     case 4 :
     {
-      obs.segment(0,49) = Eigen::VectorXd::Zero(49);
+      Eigen::Matrix3d baseRot = imu.orientation().toRotationMatrix().normalized();
+      ctl.rpy_prev_prev = ctl.rpy_prev;
+      ctl.rpy_prev = ctl.rpy;
+      ctl.rpy = mc_rbdyn::rpyFromMat(baseRot);
+      // root_r 1
+      obs(0) = ctl.rpy(0);
+      // root_p 1
+      obs(1) = ctl.rpy(1);
+      // root_ang_vel 3
+      ctl.baseAngVel = imu.angularVelocity();
+      obs(2) = ctl.baseAngVel.x();
+      obs(3) = ctl.baseAngVel.y();
+      obs(4) = ctl.baseAngVel.z();
+
+
+      Eigen::VectorXd reorderedPos = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentPos, ctl.dofNumber);
+      Eigen::VectorXd reorderedVel = ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.currentVel, ctl.dofNumber);
+
+      for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
+      {
+        int idx = ctl.usedJoints_simuOrder[i];
+        if(idx >= reorderedPos.size()) {
+          mc_rtc::log::error("Leg joint index {} out of bounds for reordered size {}", idx, reorderedPos.size());
+          ctl.legPos(i) = 0.0;
+          ctl.legVel(i) = 0.0;
+        } else {
+          ctl.legPos(i) = reorderedPos(idx);
+          ctl.legVel(i) = reorderedVel(idx);
+        }
+      }
+
+      // past action: reorder to Simulator format and extract leg joints
+      for(size_t i = 0; i < ctl.usedJoints_simuOrder.size(); ++i)
+      {
+        int idx = ctl.usedJoints_simuOrder[i];
+        if(idx >= ctl.a_simuOrder.size()) {
+          mc_rtc::log::error("Past action index {} out of bounds for size {}", idx, ctl.a_simuOrder.size());
+          ctl.legAction(i) = 0.0;
+        } else {
+          ctl.legAction(i) = ctl.a_simuOrder(idx);
+        }
+      }
+      // motor_pos 12
+      obs.segment(5, 12) = ctl.legPos;
+      // motor_vel 12
+      obs.segment(17, 12) = ctl.legVel;
+      // leg_ctrl 12 ???
+      obs.segment(29, 12) = ctl.legAction;
+      // clock 2
+      obs(41) = sin(ctl.phase_);
+      obs(42) = cos(ctl.phase_);
+      // mode 3
+      obs.segment(43,3) = Eigen::Vector3d(0,1,0);
+      // ref_mode 3
+      obs.segment(46,3) = Eigen::Vector3d(0,1,0);
+      for (int i = 0; i<49;i++)
+      {
+        mc_rtc::log::info("index {}: {}", i, obs[i]);
+      }
       break;
     }
     default:
@@ -497,104 +510,3 @@ bool utils::applyAction(mc_control::fsm::Controller & ctl_, const Eigen::VectorX
   }
   return newActionApplied;
 }
-
-void utils::startInferenceThread(mc_control::fsm::Controller & ctl_)
-{
-  auto & ctl = static_cast<RLController&>(ctl_);
-  mc_rtc::log::info("Starting RL inference thread");
-  inferenceThread_ = std::make_unique<std::thread>([this, &ctl](){
-        inferenceThreadFunction(ctl);
-    });
-}
-
-void utils::stopInferenceThread()
-{
-  if(inferenceThread_ && inferenceThread_->joinable())
-  {
-    mc_rtc::log::info("Stopping RL inference thread");
-    shouldStopInference_ = true;
-    inferenceCondition_.notify_one();
-    inferenceThread_->join();
-    inferenceThread_.reset();
-  }
-}
-
-void utils::inferenceThreadFunction(mc_control::fsm::Controller & ctl_)
-{
-  auto & ctl = static_cast<RLController&>(ctl_);
-  mc_rtc::log::info("RL inference thread started");
-  
-  while(!shouldStopInference_)
-  {
-    //wait for new observation or stop signal
-    std::unique_lock<std::mutex> lock(observationMutex_);
-    inferenceCondition_.wait(lock, [this] { 
-      return newObservationAvailable_.load() || shouldStopInference_.load(); 
-    });
-    
-    if(shouldStopInference_) break;
-    
-    // copy observation for processing
-    Eigen::VectorXd obs = ctl.currentObservation_;
-    newObservationAvailable_ = false;
-    lock.unlock();
-    
-    try
-    {
-      // Check if it's time for new inference (40Hz = 25ms period)
-      auto currentTime = std::chrono::steady_clock::now();
-      auto timeSinceLastInference = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastInferenceTime_);
-      // auto startTime = std::chrono::high_resolution_clock::now();
-      shouldRunInference_ = static_cast<double>(timeSinceLastInference.count()) >= ctl.policyPeriodMs;
-
-      newActionAvailable_ = shouldRunInference_;
-
-      if(shouldRunInference_)
-      {
-        Eigen::VectorXd action = ctl.rlPolicy_->predict(obs);
-        lastInferenceTime_ = std::chrono::steady_clock::now();
-        std::lock_guard<std::mutex> actionLock(actionMutex_);
-        ctl.currentAction_ = action;
-      }
-    }
-    catch(const std::exception & e)
-    {
-      mc_rtc::log::error("RL inference error: {}", e.what());
-      //keep using the previous action
-    }
-  }
-  
-  mc_rtc::log::info("RL inference thread stopped");
-}
-
-void utils::updateObservationForInference(mc_control::fsm::Controller & ctl_)
-{
-  auto & ctl = static_cast<RLController&>(ctl_);
-  Eigen::VectorXd obs = getCurrentObservation(ctl);
-  
-  //update shared observation
-  {
-    std::lock_guard<std::mutex> lock(observationMutex_);
-    ctl.currentObservation_ = obs;
-    newObservationAvailable_ = true;
-  }
-  
-  // notify inference thread
-  inferenceCondition_.notify_one();
-}
-
-Eigen::VectorXd utils::getLatestAction(mc_control::fsm::Controller & ctl_)
-{
-  auto & ctl = static_cast<RLController&>(ctl_);
-  if(newActionAvailable_)
-  {
-    std::lock_guard<std::mutex> lock(actionMutex_);
-    if(newActionAvailable_)
-    {
-      ctl.latestAction_ = ctl.currentAction_;
-      newActionAvailable_ = false;
-    }
-  }
-  return ctl.latestAction_;
-} 
-

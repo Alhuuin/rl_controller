@@ -2,6 +2,7 @@
 #include <mc_rtc/logging.h>
 #include <string>
 #include <vector>
+#include <numeric>
 
 PolicySimulatorHandling::PolicySimulatorHandling()
 {
@@ -30,7 +31,8 @@ PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_na
   }
   else if (robot_name == "HRP5P" && simulator_name == "custom_rohan")
   {
-    mcRtcToSimuIdx_ = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    mcRtcToSimuIdx_.assign(53, 0);
+    std::iota(mcRtcToSimuIdx_.begin(), mcRtcToSimuIdx_.end(), 0);
     simuToMcRtcIdx_ = invertMapping(mcRtcToSimuIdx_);
   }
   else {
