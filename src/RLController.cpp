@@ -69,10 +69,7 @@ bool RLController::run()
   if (useResidual)
   {
     if (robotName == "H1")
-    {
-      auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-      auto tau_ext = extTorqueSensor.torques();
-    }
+      auto tau_ext = robot().externalTorques();
   }
   bool run = mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
   robot().forwardKinematics();
@@ -431,10 +428,7 @@ void RLController::computeInversePD()
   if (useResidual)
   {
     if (robotName == "H1")
-    {
-      auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-      extTorques = extTorqueSensor.torques();
-    }
+      extTorques = robot().externalTorques();
   }
   Eigen::VectorXd tau_cmd_w_floatingBase = M_w_floatingBase*ddot_qp_w_floatingBase + Cg_w_floatingBase - extTorques;
   tau_cmd = tau_cmd_w_floatingBase.tail(dofNumber);
@@ -462,8 +456,7 @@ void RLController::computeRLStateSimulated()
   Eigen::VectorXd extTorques = Eigen::VectorXd::Zero(robot().mb().nrDof());
   if (useResidual)
   {
-    auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-    extTorques = extTorqueSensor.torques();
+    extTorques = robot().externalTorques();
   }
   tau_rl = (pd_gains_ratio * kp_vector).cwiseProduct(q_rl - currentPos) - (pd_gains_ratio * kd_vector).cwiseProduct(currentVel);
   Eigen::VectorXd tau_rl_w_floating_base = Eigen::VectorXd::Zero(robot().mb().nrDof());
@@ -1034,8 +1027,7 @@ std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(c
 
   if(!hasForceBasedRatio && useResidual)
   {
-    auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
-    const auto & extTorques = extTorqueSensor.torques();
+    const auto & extTorques = robot().externalTorques();
     const size_t weightedContacts = std::min(anchorLinks.size(), residualAnchorWeightJointIndices.size());
     if(weightedContacts > 0)
     {
