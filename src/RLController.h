@@ -3,7 +3,7 @@
 #include <mc_control/fsm/Controller.h>
 #include <mc_rtc/Configuration.h>
 #include <mc_tasks/PostureTask.h>
-#include <mc_tasks/TorqueTask.h>
+#include <mc_tasks/TorqueJointTask.h>
 
 #include "api.h"
 
@@ -57,7 +57,7 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller {
                                   // RL policy
 
   // Task
-  std::shared_ptr<mc_tasks::TorqueTask> torqueTask;
+  std::shared_ptr<mc_tasks::TorqueJointTask> torqueJointTask;
 
   std::map<std::string, std::vector<double>> torque_target; // Target torques for the torque task;
   bool useQP = true;

@@ -34,9 +34,6 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt,
           robots(), 0, {diPercent, dsPercent, 0.0, 1.2, 200.0}, velPercent, true));
   solver().addConstraintSet(dynamicsConstraint);
 
-  // Initialize Task
-  torqueTask = std::make_shared<mc_tasks::TorqueTask>(solver(), robot().robotIndex());
-
   addGui(config);
   addLog();
   mc_rtc::log::success("RLController init");
@@ -354,7 +351,9 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration& co
     }
   }
   // Update PD gains if necessary
-  setPDGains(kp_vector, kd_vector);
+  // setPDGains(kp_vector, kd_vector);
+  torqueJointTask->setStiffness(kp_vector);
+  torqueJointTask->setDamping(kd_vector);
 }
 
 void RLController::tasksComputation(Eigen::VectorXd& currentTargetPosition) {
@@ -642,9 +641,11 @@ void RLController::addGui(const mc_rtc::Configuration& config) {
                         [this](double v) {
                           pd_gains_ratio = v;
                           // Update the actual gains on the robot when ratio changes
-                          if (datastore().has(robot().name() + "::SetPDGains"))
-                            setPDGains(kp_vector, kd_vector);
-                          else
+                          if (datastore().has(robot().name() + "::SetPDGains")) {
+                            // setPDGains(kp_vector, kd_vector);
+                            torqueJointTask->setStiffness(kp_vector);
+                            torqueJointTask->setDamping(kd_vector);
+                          } else
                             mc_rtc::log::warning(
                                 "Cannot set PD gains ratio, SetPDGains not found in datastore");
                         },
@@ -801,6 +802,14 @@ void RLController::initializeRobot(const mc_rtc::Configuration& config) {
   auto alphaIn = real_robot.mbc().alpha;
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
+
+  mc_rtc::log::error(current_kp.size());
+  // Initialize Task
+  torqueJointTask =
+      std::make_shared<mc_tasks::TorqueJointTask>(solver(), robot().robotIndex(), 100.0, 1);
+  torqueJointTask->setStiffness(current_kp);
+  torqueJointTask->setDamping(current_kd);
+  torqueJointTask->setPosTarget(q_rl);
 }
 
 void RLController::initializeRLPolicy(const mc_rtc::Configuration& config) {
@@ -989,7 +998,7 @@ bool RLController::gainsUpdateRequired(double tol) {
 
 void RLController::initializeState() {
   // Update PD gains if necessary
-  setPDGains(kp_vector, kd_vector);
+  // setPDGains(kp_vector, kd_vector);
   tasksComputation(q_rl);
 }
 

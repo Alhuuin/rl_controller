@@ -8,14 +8,14 @@
 void utils::start_rl_state(mc_control::fsm::Controller& ctl_, std::string state_name) {
   auto& ctl = static_cast<RLController&>(ctl_);
   mc_rtc::log::info("{} state started", state_name);
-  lastInferenceTime_ = std::chrono::steady_clock::now();
-  action = Eigen::VectorXd::Zero(ctl.rlPolicy_->getActionSize());
+  // lastInferenceTime_ = std::chrono::steady_clock::now();
+  // action = Eigen::VectorXd::Zero(ctl.rlPolicy_->getActionSize());
 
-  stepCount_ = 0;
+  // stepCount_ = 0;
   syncTime_ = ctl.policyPeriodMs / 1000;
-  startTime_ =
-      std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch())
-          .count();
+  // startTime_ =
+  //     std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch())
+  //         .count();
 
   if (!ctl.rlPolicy_ || !ctl.rlPolicy_->isLoaded()) {
     mc_rtc::log::error("RL policy not loaded in {} state", state_name);
@@ -38,7 +38,7 @@ void utils::start_rl_state(mc_control::fsm::Controller& ctl_, std::string state_
 void utils::run_rl_state(mc_control::fsm::Controller& ctl_, std::string state_name) {
   auto& ctl = static_cast<RLController&>(ctl_);
 
-  auto startTime = std::chrono::high_resolution_clock::now();
+  // auto startTime = std::chrono::high_resolution_clock::now();
 
   try {
     syncTime_ += ctl.timeStep;
@@ -59,18 +59,18 @@ void utils::run_rl_state(mc_control::fsm::Controller& ctl_, std::string state_na
 }
 
 void utils::teardown_rl_state(mc_control::fsm::Controller& ctl_, std::string state_name) {
-  mc_rtc::log::info("{} state ending after {} steps", state_name, stepCount_);
+  // mc_rtc::log::info("{} state ending after {} steps", state_name, stepCount_);
 
   ctl_.gui()->removeCategory({"RLController", state_name});
 
-  double currentTime =
-      std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch())
-          .count();
-  double totalTime = currentTime - startTime_;
-  double avgFreq = static_cast<double>(stepCount_) / totalTime;
+  // double currentTime =
+  //     std::chrono::duration<double>(std::chrono::high_resolution_clock::now().time_since_epoch())
+  //         .count();
+  // double totalTime = currentTime - startTime_;
+  // double avgFreq = static_cast<double>(stepCount_) / totalTime;
 
-  mc_rtc::log::info("{} final stats: {} steps in {:.2f}s, avg freq = {:.1f} Hz", state_name,
-                    stepCount_, totalTime, avgFreq);
+  // mc_rtc::log::info("{} final stats: {} steps in {:.2f}s, avg freq = {:.1f} Hz", state_name,
+  //                   stepCount_, totalTime, avgFreq);
 }
 
 Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller& ctl_) {
