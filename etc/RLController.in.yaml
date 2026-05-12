@@ -48,6 +48,16 @@ ObserverPipelines:
           finalAlpha: 2
           finalBeta: 2
           finalGamma: 1
+    - type: ExternalForcesObserver
+      required: true
+      config:
+        residual_gain: 30
+        reference_frame: pelvis
+        verbose: false
+        ft_sensor_name: none
+        use_force_sensor: false
+        torque_source_type: CommandedTorque
+        residual_speed_gain: 100
 
 # Transition from initial state to RL execution
 transitions:
@@ -55,8 +65,6 @@ transitions:
 - [RL_State, OK, RL_State, Strict]
 
 init: RL_State
-
-Plugins: [ExternalForcesEstimator]
 
 Robot:
   H1:  
