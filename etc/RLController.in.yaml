@@ -67,27 +67,27 @@ transitions:
 init: RL_State
 
 Robot:
-  H1:  
+  H1:
     mc_rtc_joints_order: [
-      "left_hip_yaw_joint",      
-      "left_hip_roll_joint",       
-      "left_hip_pitch_joint",    
-      "left_knee_joint",         
-      "left_ankle_joint",        
-      "right_hip_yaw_joint",     
-      "right_hip_roll_joint",    
-      "right_hip_pitch_joint",   
-      "right_knee_joint",        
-      "right_ankle_joint",       
-      "torso_joint",             
-      "left_shoulder_pitch_joint",  
-      "left_shoulder_roll_joint",     
-      "left_shoulder_yaw_joint",    
-      "left_elbow_joint",           
-      "right_shoulder_pitch_joint", 
-      "right_shoulder_roll_joint",  
-      "right_shoulder_yaw_joint",   
-      "right_elbow_joint"           
+      "left_hip_yaw_joint",
+      "left_hip_roll_joint",
+      "left_hip_pitch_joint",
+      "left_knee_joint",
+      "left_ankle_joint",
+      "right_hip_yaw_joint",
+      "right_hip_roll_joint",
+      "right_hip_pitch_joint",
+      "right_knee_joint",
+      "right_ankle_joint",
+      "torso_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint"
     ]
     anchor_links: [
       "left_ankle_link",
@@ -390,7 +390,7 @@ policies:
         LCP: 200.0
         LKP: 150.0
         LAP: 80.0
-        LAR: 80.0 
+        LAR: 80.0
         WP: 80.0
         WR: 80.0
         WY: 80.0
@@ -444,7 +444,7 @@ policies:
         LCP: 20.0
         LKP: 15.0
         LAP: 8.0
-        LAR: 8.0 
+        LAR: 8.0
         WP: 8.0
         WR: 8.0
         WY: 8.0

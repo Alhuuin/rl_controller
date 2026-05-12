@@ -22,12 +22,8 @@ endif()
 
 add_subdirectory(src)
 
-configure_file(
-  etc/RLController.in.yaml
-  "${CMAKE_CURRENT_BINARY_DIR}/etc/RLController.yaml"
-)
+configure_file(etc/RLController.in.yaml
+               "${CMAKE_CURRENT_BINARY_DIR}/etc/RLController.yaml")
 
-install(
-  FILES "${CMAKE_CURRENT_BINARY_DIR}/etc/RLController.yaml"
-  DESTINATION "${MC_CONTROLLER_RUNTIME_INSTALL_PREFIX}/etc"
-)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/etc/RLController.yaml"
+        DESTINATION "${MC_CONTROLLER_RUNTIME_INSTALL_PREFIX}/etc")
