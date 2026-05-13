@@ -249,7 +249,6 @@ void RLController::addLog()
 
   // RL variables
   logger().addLogEntry("RLController_RL_q", [this]() { return q_rl; });
-  logger().addLogEntry("RLController_RL_pastAction", [this]() { return a_simuOrder; });
   logger().addLogEntry("RLController_RL_qZero", [this]() { return q_zero_vector; });
   logger().addLogEntry("RLController_RL_currentObservation", [this]() { return currentObservation; });
   logger().addLogEntry("RLController_RL_a_vector", [this]() { return a_vector; });
@@ -419,11 +418,10 @@ std::pair<sva::PTransformd, Eigen::Vector3d> RLController::createContactAnchor(c
   sva::MotionVecd v_foot_r = anchorRobot.bodyVelW("right_ankle_link");
   sva::MotionVecd v_foot_l = anchorRobot.bodyVelW("left_ankle_link");
 
-  auto extTorqueSensor = robot().device<mc_rbdyn::VirtualTorqueSensor>("ExtTorquesVirtSensor");
   int right_knee_index = int(robot().jointIndexByName("right_knee_joint")) + 5;
   int left_knee_index = int(robot().jointIndexByName("left_knee_joint")) + 5;
-  double tau_ext_knee_r =  abs(extTorqueSensor.torques()[right_knee_index]);
-  double tau_ext_knee_l =  abs(extTorqueSensor.torques()[left_knee_index]);
+  double tau_ext_knee_r =  abs(robot().externalTorques()[right_knee_index]);
+  double tau_ext_knee_l =  abs(robot().externalTorques()[left_knee_index]);
   double leftFootRatio = tau_ext_knee_l/(tau_ext_knee_r+tau_ext_knee_l);
   if(tau_ext_knee_r + tau_ext_knee_l < 0.02)
   {
