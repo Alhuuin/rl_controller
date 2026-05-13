@@ -62,12 +62,12 @@ bool RLController::run() {
   auto alphaIn = real_robot.mbc().alpha;
   floatingBase_qIn = rbd::paramToVector(robot().mb(), qIn);
   floatingBase_alphaIn = rbd::dofToVector(robot().mb(), alphaIn);
-  Eigen::MatrixXd Kp_inv = (pd_gains_ratio * kp_vector).cwiseInverse().asDiagonal();
-  if (useResidual) {
-    if (robotName == "H1")
-      auto tau_ext = robot().externalTorques();
-  }
-  bool run = mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
+
+  bool run = false;
+  if (isTorqueControl)
+    run = mc_control::fsm::Controller::run(mc_solver::FeedbackType::ClosedLoopIntegrateReal);
+  else
+    run = mc_control::fsm::Controller::run();
   robot().forwardKinematics();
   robot().forwardVelocity();
   robot().forwardAcceleration();
@@ -80,10 +80,6 @@ bool RLController::run() {
     updateRobotCmdAfterQP();
     return true;
   }
-  // Use QP
-  computeInversePD();
-  updateRobotCmdAfterQP();
-  computeRLStateSimulated();
   return run; // Return false if QP fails
 }
 
@@ -352,8 +348,12 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration& co
   }
   // Update PD gains if necessary
   // setPDGains(kp_vector, kd_vector);
-  torqueJointTask->setStiffness(kp_vector);
-  torqueJointTask->setDamping(kd_vector);
+  const Eigen::VectorXd target_kp = pd_gains_ratio * kp_vector;
+  const Eigen::VectorXd target_kd = pd_gains_ratio * kd_vector;
+  current_kp = target_kp;
+  current_kd = target_kd;
+  torqueJointTask->setStiffness(target_kp);
+  torqueJointTask->setDamping(target_kd);
 }
 
 void RLController::tasksComputation(Eigen::VectorXd& currentTargetPosition) {
@@ -640,11 +640,15 @@ void RLController::addGui(const mc_rtc::Configuration& config) {
                         "PD Gains Ratio", [this]() { return pd_gains_ratio; },
                         [this](double v) {
                           pd_gains_ratio = v;
+                          const Eigen::VectorXd target_kp = pd_gains_ratio * kp_vector;
+                          const Eigen::VectorXd target_kd = pd_gains_ratio * kd_vector;
+                          current_kp = target_kp;
+                          current_kd = target_kd;
                           // Update the actual gains on the robot when ratio changes
                           if (datastore().has(robot().name() + "::SetPDGains")) {
                             // setPDGains(kp_vector, kd_vector);
-                            torqueJointTask->setStiffness(kp_vector);
-                            torqueJointTask->setDamping(kd_vector);
+                            torqueJointTask->setStiffness(target_kp);
+                            torqueJointTask->setDamping(target_kd);
                           } else
                             mc_rtc::log::warning(
                                 "Cannot set PD gains ratio, SetPDGains not found in datastore");
@@ -807,8 +811,12 @@ void RLController::initializeRobot(const mc_rtc::Configuration& config) {
   // Initialize Task
   torqueJointTask =
       std::make_shared<mc_tasks::TorqueJointTask>(solver(), robot().robotIndex(), 100.0, 1);
-  torqueJointTask->setStiffness(current_kp);
-  torqueJointTask->setDamping(current_kd);
+  const Eigen::VectorXd target_kp = pd_gains_ratio * kp_vector;
+  const Eigen::VectorXd target_kd = pd_gains_ratio * kd_vector;
+  current_kp = target_kp;
+  current_kd = target_kd;
+  torqueJointTask->setStiffness(target_kp);
+  torqueJointTask->setDamping(target_kd);
   torqueJointTask->setPosTarget(q_rl);
 }
 
@@ -997,8 +1005,13 @@ bool RLController::gainsUpdateRequired(double tol) {
 }
 
 void RLController::initializeState() {
-  // Update PD gains if necessary
-  // setPDGains(kp_vector, kd_vector);
+  const Eigen::VectorXd target_kp = pd_gains_ratio * kp_vector;
+  const Eigen::VectorXd target_kd = pd_gains_ratio * kd_vector;
+  current_kp = target_kp;
+  current_kd = target_kd;
+  torqueJointTask->setStiffness(target_kp);
+  torqueJointTask->setDamping(target_kd);
+  torqueJointTask->setPosTarget(q_rl);
   tasksComputation(q_rl);
 }
 

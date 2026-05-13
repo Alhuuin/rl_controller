@@ -6,8 +6,6 @@ void RL_State::configure(const mc_rtc::Configuration& config) {}
 void RL_State::start(mc_control::fsm::Controller& ctl_) {
   auto& ctl = static_cast<RLController&>(ctl_);
   ctl.utils_.start_rl_state(ctl, "RL_State");
-  // ctl.initializeState();
-  // ctl.torqueTask->target(ctl.torque_target);
   ctl.solver().addTask(ctl.torqueJointTask);
   mc_rtc::log::info("RLState started");
 }
@@ -15,8 +13,6 @@ void RL_State::start(mc_control::fsm::Controller& ctl_) {
 bool RL_State::run(mc_control::fsm::Controller& ctl_) {
   auto& ctl = static_cast<RLController&>(ctl_);
   ctl.utils_.run_rl_state(ctl, "RL_State");
-  // ctl.tasksComputation(ctl.q_rl);
-  // ctl.torqueTask->target(ctl.torque_target);
   ctl.torqueJointTask->setPosTarget(ctl.q_rl);
   return false;
 }

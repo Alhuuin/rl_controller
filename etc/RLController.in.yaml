@@ -51,7 +51,7 @@ ObserverPipelines:
     - type: ExternalForcesObserver
       required: true
       config:
-        residual_gain: 30
+        residual_gain: 100
         reference_frame: pelvis
         verbose: false
         ft_sensor_name: none

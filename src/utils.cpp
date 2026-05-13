@@ -87,6 +87,11 @@ Eigen::VectorXd utils::getCurrentObservation(mc_control::fsm::Controller& ctl_) 
   auto& real_robot = ctl.realRobot(ctl.robots()[0].name());
   auto& imu = ctl.robot().bodySensor("Accelerometer");
 
+  auto q_map = real_robot.encoderValues();
+  auto q_dot_map = real_robot.encoderVelocities();
+  ctl.currentPos = Eigen::VectorXd::Map(q_map.data(), q_map.size());
+  ctl.currentVel = Eigen::VectorXd::Map(q_dot_map.data(), q_dot_map.size());
+
   switch (ctl.currentPolicyIndex) {
   case 0: {
     // ctl.baseAngVel = robot.bodyVelW("pelvis").angular();
@@ -470,6 +475,10 @@ bool utils::applyAction(mc_control::fsm::Controller& ctl_, const Eigen::VectorXd
 
     ctl.a_simuOrder =
         ctl.policySimulatorHandling_->reorderJointsToSimulator(ctl.a_vector, ctl.dofNumber);
+
+    if (ctl.torqueJointTask) {
+      ctl.torqueJointTask->setPosTarget(ctl.q_rl);
+    }
 
     static int inferenceCounter = 0;
     inferenceCounter++;
