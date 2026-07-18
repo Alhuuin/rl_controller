@@ -32,8 +32,11 @@ bool RLController::run()
     RLuseJoyStickInputs();
   else
     RLuseKeyboardInputs();
+
+  if(printLimits_) computeLimits();
   
-  bool run = manageModeSwitching();
+  bool run = mc_control::fsm::Controller::run(
+          mc_solver::FeedbackType::ClosedLoopIntegrateReal);
   if(byPassQPControl()) // Run RL without taking the QP into account
   {
     return true;
@@ -50,17 +53,9 @@ void RLController::reset(const mc_control::ControllerResetData & reset_data)
 void RLController::initializeRobot(const mc_rtc::Configuration & config)
 {
   useQP_ = config("policies")[currentPolicyIndex]("use_QP", true);
-  isTorqueControl_ = config("policies")[currentPolicyIndex]("is_torque_control", false);
-  if(isTorqueControl_)
-  {
-    mc_rtc::log::info("Using Torque Control mode");
-    datastore().make<std::string>("ControlMode", "Torque");
-  }
-  else
-  {
-    mc_rtc::log::info("Using Position Control mode");
-    datastore().make<std::string>("ControlMode", "Position");
-  }
+
+  mc_rtc::log::info("Using Torque Control mode");
+  datastore().make<std::string>("ControlMode", "Torque");
 
   // get the joints order (urdf) depending on the robot used
   robotName_ = robot().name();
@@ -178,9 +173,6 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
   
   // Update policy-specific boolean flags
   useQP_ = config("policies")[currentPolicyIndex]("use_QP", true);
-  isTorqueControl_ = config("policies")[currentPolicyIndex]("is_torque_control", false);
-  if(isTorqueControl_) datastore().get<std::string>("ControlMode") = "Torque";
-  else datastore().get<std::string>("ControlMode") = "Position";
 
   configRL(config);
 
@@ -208,11 +200,6 @@ void RLController::switchPolicy(int policyIndex, const mc_rtc::Configuration & c
 bool RLController::byPassQPControl()
 {
   if(useQP_) return false; // QP is not bypassed, do nothing
-  if(!isTorqueControl_)
-  {
-    mc_rtc::log::warning("[RLController] QP can't be bypassed in position control mode. Please enable torque control to bypass QP.");
-    return false;
-  }
 
   robot().forwardKinematics();
   robot().forwardVelocity();
@@ -263,7 +250,6 @@ void RLController::addLog()
   
   // Controller state variables
   logger().addLogEntry("RLController_useQP", [this]() { return useQP_; });
-  logger().addLogEntry("RLController_isTorqueControl", [this]() { return isTorqueControl_; });
 
   // Log current policy (combined index and path)
   logger().addLogEntry("RLController_currentPolicy", [this]() { 
@@ -326,16 +312,14 @@ void RLController::addGui(const mc_rtc::Configuration & config)
     mc_rtc::gui::Transform("Anchor Frame",contactAnchorTf_)
   );
 
-  gui()->addElement({"ControlMode"}, 
-    mc_rtc::gui::Button("Switch Control Mode", [this]()
+  gui()->addElement({"ControlMode"},
+    mc_rtc::gui::Button("Toggle print joint limits", [this]()
       {
-        controlModeChanged_ = true;
-        isTorqueControl_ = !isTorqueControl_;
+        printLimits_ = !printLimits_;
+      }), 
+      mc_rtc::gui::Label("Print joint limits", [this]() {
+        return printLimits_ ? "Enabled" : "Disabled";
       }),
-      mc_rtc::gui::Label("Current Control Mode", [this]()
-        {
-          return isTorqueControl_ ? "Torque Control" : "Position Control";
-        }),
       mc_rtc::gui::Button("Toggle QP Control", [this]()
         {
           useQP_ = !useQP_;
@@ -535,30 +519,57 @@ void RLController::RLuseKeyboardInputs()
   velCmdRL(1) = (active(2) ? maxVelCmd_ : 0.0) - (active(3) ? maxVelCmd_ : 0.0);
 }
 
-bool RLController::manageModeSwitching()
+void RLController::computeLimits()
 {
-  if(controlModeChanged_)
-  {
-    if(isTorqueControl_)
-    {
-      mc_rtc::log::info("Switching to Torque Control");
-      datastore().assign<std::string>("ControlMode", "Torque");
-    }
-    else
-    {
-      mc_rtc::log::info("Switching to Position Control");
-      datastore().assign<std::string>("ControlMode", "Position");
-    }
-    controlModeChanged_ = false;
-  }
+  const double epsilon = 1e-5;
 
-  if(isTorqueControl_)
+  auto & robot = robots()[0];
+  const auto & currentPos = robot.q();
+  const auto & currentVel = robot.alpha();
+  const auto & currentTau = robot.jointTorque();
+
+  const auto & qLimLower = robot.ql();
+  const auto & qLimUpper = robot.qu();
+
+  const auto & qDotLimLower = robot.vl();
+  const auto & qDotLimUpper = robot.vu();
+
+  const auto & tauLimLower = robot.tl();
+  const auto & tauLimUpper = robot.tu();
+
+  for (std::string joint : robot.refJointOrder())
   {
-    return mc_control::fsm::Controller::run(
-          mc_solver::FeedbackType::ClosedLoopIntegrateReal);
-  }
-  else 
-  {
-    return mc_control::fsm::Controller::run();
+    size_t i = robot.jointIndexByName(joint);
+
+    const double ds = dsPercent_ * (qLimUpper[i][0] - qLimLower[i][0]);
+    const double posLimitUp = qLimUpper[i][0] - ds;
+    const double posLimitLow = qLimLower[i][0] + ds;
+    const double velLimitUp = velPercent_ * qDotLimUpper[i][0];
+    const double velLimitLow = velPercent_ * qDotLimLower[i][0];
+    const double tauLimitUp = tauLimUpper[i][0];
+    const double tauLimitLow = tauLimLower[i][0];
+
+    if (currentPos[i][0] > posLimitUp + epsilon)
+    {
+      mc_rtc::log::warning("[NewRLQPController] Joint {} position upper limit breached: currentPos = {}, limit = {}", joint, currentPos[i][0], posLimitUp);
+    }
+    if (currentPos[i][0] < posLimitLow - epsilon)
+    {
+      mc_rtc::log::warning("[NewRLQPController] Joint {} position lower limit breached: currentPos = {}, limit = {}", joint, currentPos[i][0], posLimitLow);
+    }
+    if (currentVel[i][0] > velLimitUp + epsilon)
+    {
+      mc_rtc::log::warning("[NewRLQPController] Joint {} velocity upper limit breached: currentVel = {}, limit = {}", joint, currentVel[i][0], velLimitUp);
+    }
+    if (currentVel[i][0] < velLimitLow - epsilon)
+    {
+      mc_rtc::log::warning("[NewRLQPController] Joint {} velocity lower limit breached: currentVel = {}, limit = {}", joint, currentVel[i][0], velLimitLow);
+    }
+    if (currentTau[i][0] > tauLimitUp + epsilon)    {
+      mc_rtc::log::warning("[NewRLQPController] Joint {} torque upper limit breached: currentTau = {}, limit = {}", joint, currentTau[i][0], tauLimitUp);
+    }
+    if (currentTau[i][0] < tauLimitLow - epsilon)    {
+      mc_rtc::log::warning("[NewRLQPController] Joint {} torque lower limit breached: currentTau = {}, limit = {}", joint, currentTau[i][0], tauLimitLow);
+    }
   }
 }

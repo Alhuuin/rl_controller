@@ -58,13 +58,14 @@ transitions:
 - [RL_State, OK, RL_State, Strict]
 
 init: RL_State
+
+Plugins: [mc_joystick_plugin]
  
 policy_path: ["standing_h1.onnx", "walking_better_h1.onnx"]  # Path to the RL policy file(s)
 default_policy_index: 1 # Index of the default policy to use
 policies:
   # index 0 : standing policy
-  - is_torque_control: true
-    use_QP: true
+  - use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
     pd_gains_ratio: 1.0
@@ -109,8 +110,7 @@ policies:
         right_shoulder_yaw_joint: 5.0
         right_elbow_joint: 5.0
   # index 1 : walking_policy
-  - is_torque_control: true
-    use_QP: true
+  - use_QP: true
     simulator: "Maniskill"
     used_joints_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #legs
     pd_gains_ratio: 1.0

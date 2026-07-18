@@ -67,7 +67,6 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
     void initializeRLPolicy(const mc_rtc::Configuration & config);
     void switchPolicy(int policyIndex, const mc_rtc::Configuration & config);  // Switch to a different policy at runtime
 
-    bool manageModeSwitching(); // Handle switching between Torque and Position control modes
     bool byPassQPControl(); // Directly use RL output without QP modifications
     
     std::pair<sva::PTransformd, Eigen::Vector3d> createContactAnchor(const mc_rbdyn::Robot & anchorRobot);
@@ -75,13 +74,14 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
     void RLuseJoyStickInputs();
     void RLuseKeyboardInputs();
 
+    void computeLimits();
+    bool printLimits_ = true;
+
     std::string robotName_;
     std::vector<std::string> jointNames_;
 
     // Mode switching
     bool useQP_ = true;
-    bool isTorqueControl_ = false;
-    bool controlModeChanged_ = false;
 
     // Constraint configuration
     double velPercent_ = 0.95;

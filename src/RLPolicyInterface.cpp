@@ -37,17 +37,17 @@ void RLPolicyInterface::loadPolicy(const std::string & path)
     sessionOptions.SetIntraOpNumThreads(1);
     sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
     
-    // try CUDA if available
-    try 
-    {
-      OrtCUDAProviderOptions cuda_options{};
-      sessionOptions.AppendExecutionProvider_CUDA(cuda_options);
-      mc_rtc::log::info("CUDA provider added for ONNX inference");
-    }
-    catch(const std::exception&)
-    {
-      mc_rtc::log::info("CUDA not available, using CPU for ONNX inference");
-    }
+    // // try CUDA if available
+    // try 
+    // {
+    //   OrtCUDAProviderOptions cuda_options{};
+    //   sessionOptions.AppendExecutionProvider_CUDA(cuda_options);
+    //   mc_rtc::log::info("CUDA provider added for ONNX inference");
+    // }
+    // catch(const std::exception&)
+    // {
+    //   mc_rtc::log::info("CUDA not available, using CPU for ONNX inference");
+    // }
     
     onnxSession_ = std::make_unique<Ort::Session>(*onnxEnv_, path.c_str(), sessionOptions);
     

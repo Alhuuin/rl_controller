@@ -1,6 +1,14 @@
 # RLController
 
-An FSM controller that integrates reinforcement learning policies with [mc_rtc](https://jrl-umi3218.github.io/mc_rtc/) for robotic control. This package provides example policies for the H1 humanoid robot and the Go2 robot. It currently only supports ONNX format for policy deployment.
+Acc-CBF-QP was introduced in:
+
+> **Safe Execution of RL Policies via Acceleration-based CBF-QP Constraint Enforcement for Real-World Robotic Deployments**
+> Bastien Muraccioli, Alice Cariou, Pierre-Alexandre Leziart, Mathieu Celerier, Arnaud Demont, Gentiane Venture, Mehdi Benallegue
+> IROS 2026 — [Paper](https://hal.science/hal-05362571) · [Project page](https://safe-rl-qp.github.io/)
+
+Part of the Acc-CBF-QP ecosystem: [paper implementation](https://github.com/safe-rl-qp/mc-safe-rl-qp) · [superbuild](https://github.com/safe-rl-qp/safe-rl-qp-mc-rtc-superbuild) · [controller template](https://github.com/bastien-muraccioli/new-rl-qp-controller) · [community controllers](https://github.com/safe-rl-qp/awesome-safe-rl-qp)
+
+An FSM controller that integrates reinforcement learning policies with [mc_rtc](https://jrl-umi3218.github.io/mc_rtc/) for robotic control. This package provides example policies for the H1 humanoid robot. It currently only supports ONNX format for policy deployment.
 
 **Note**: ONNX Runtime is bundled with this repository—no external installation required.
 
@@ -16,20 +24,7 @@ The controller is organized into the following components:
 
 ## Building
 
-### Dependencies
-
-All required dependencies and their specific versions are available in this branch of the [mc_rtc_superbuild](https://github.com/Alhuuin/mc-rtc-superbuild/tree/rl_controller) if you need a quick installation setup.
-
-The use of the ExternalForcesEstimator plugin is highly necessary with humanoid robots, it is thus enabled by default in that case.
-
-### Build commands
-
-```bash
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
-make -j$(nproc)
-make install
-```
+The easiest way to get this controller running is through the [safe-rl-qp-mc-rtc-superbuild](https://github.com/safe-rl-qp/safe-rl-qp-mc-rtc-superbuild), which installs mc_rtc, all required dependencies, and this controller in one go — enabling the `WITH_H1` option builds and installs RLController automatically alongside the H1 robot module. Follow the superbuild's README for the full walkthrough; you don't need to follow the manual steps below unless you're building this repo standalone (e.g. while developing it directly, or adapting it via the [controller template](https://github.com/bastien-muraccioli/new-rl-qp-controller)).
 
 ## Usage
 
@@ -47,9 +42,17 @@ Default policies are located in the [`policy/`](policy/) directory. The controll
 
 ### Velocity Control
 
-For policies that support velocity commands, two control method are supported :
-- control using the mc_joystick plugin is fully supported. This allows real-time velocity yaw control through a game controller using the left joystick or left arrows and yaw control using the right joystick.
-- control using keyboard arrows is precarious but is available. Currently only x and y control is possible with this method.
+For policies that support velocity commands, three control methods are available:
+
+- **Gamepad control**: If a compatible gamepad is plugged into the PC, the controller will automatically use it for velocity commands. The controls are:
+  - **Left joystick** or **D-pad**: control the commanded **X** and **Y** linear velocities.
+  - **Right joystick (horizontal axis)**: control the commanded **yaw** velocity.
+
+  This functionality is provided through the `mc_joystick` plugin and offers smooth real-time control of the robot.
+
+- **mc_rtc GUI**: The commanded **X** and **Y** linear velocities, as well as the **yaw** velocity, can also be adjusted manually from the mc_rtc GUI. This is useful for testing policies or operating the robot without a gamepad.
+
+- **Keyboard control**: Keyboard arrow keys can also be used. Currently, only **X** and **Y** velocity control is supported when using the keyboard.
 
 ### Configuring Policies
 
@@ -57,7 +60,6 @@ For policies that support velocity commands, two control method are supported :
 
 - **Configure policy parameters** in [`etc/RLController.in.yaml`](etc/RLController.in.yaml). Each policy can specify:
    - `*robot_name`: Robot name
-   - `*is_torque_control`: Control mode (position/torque)
    - `*use_QP`: QP usage (true/false)
    - `*simulator`: RL env used during training
    - `*used_joints_index`: Joints indices by policy (mc_rtc order)
@@ -71,8 +73,7 @@ Parameters with "*" are necessary. The others are optional.
 
 - **Define observation vectors** in [`src/utils.cpp`](src/utils.cpp#L131) (l.131). The file includes default examples for:
    - Standing policy for H1 (case 0)
-   - Walking policies for H1 (cases 1-2)
-   - Walking policy for Go2 (3)
+   - Walking policies for H1 (cases 1)
 
 ## Advanced Setup
 
