@@ -34,20 +34,23 @@ ObserverPipelines:
 
   observers:
     - type: Encoder
-      config:
-          velocity: encoderVelocities
+      velocity: encoderVelocities
     - type: Tilt
       required: true
       update: true
-      config:
-        anchorFrameFunction: anchorFrameFunction
-        filterGains:
-          initAlpha: 2
-          initBeta: 2
-          initGamma: 1
-          finalAlpha: 2
-          finalBeta: 2
-          finalGamma: 1
+      anchorFrameFunction: anchorFrameFunction
+      filterGains:
+        initAlpha: 2
+        initBeta: 2
+        initGamma: 1
+        finalAlpha: 2
+        finalBeta: 2
+        finalGamma: 1
+    - type: ExternalForcesObserver
+      residual_gain: 100.0
+      torque_source_type: CommandedTorque
+      estimation_method: MomentumObserver
+      use_forces_from_ft_sensors: false
 
 # Transition from initial state to RL execution
 transitions:

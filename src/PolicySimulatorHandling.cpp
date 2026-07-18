@@ -25,7 +25,7 @@ PolicySimulatorHandling::PolicySimulatorHandling(const std::string& simulator_na
   }
   else {
       mc_rtc::log::error_and_throw("Unsupported simulator or robot: {} with {}, please specify a mc_rtc to simulator joint order mapping in PolicySimulatorHandling.h", simulator_name, robot_name);
-  }
+  } 
 }
 
 PolicySimulatorHandling::~PolicySimulatorHandling()
