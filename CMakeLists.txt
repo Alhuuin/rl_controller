@@ -48,6 +48,13 @@ endif()
 
 add_subdirectory(src)
 
+set(ONNX_POLICY_DIR "${MC_CONTROLLER_RUNTIME_INSTALL_PREFIX}/share/rl_controller/policy")
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/policy/
+  DESTINATION ${ONNX_POLICY_DIR} 
+  FILES_MATCHING PATTERN "*.onnx"
+)
+
 configure_file(
   etc/RLController.in.yaml
   "${CMAKE_CURRENT_BINARY_DIR}/etc/RLController.yaml"
@@ -57,3 +64,5 @@ install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/etc/RLController.yaml"
   DESTINATION "${MC_CONTROLLER_RUNTIME_INSTALL_PREFIX}/etc"
 )
+
+

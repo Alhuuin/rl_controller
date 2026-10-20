@@ -100,6 +100,15 @@
               };
 
             };
+            h1-mj-description = { pkgs-final, ... }: {
+              version = "1.1.0";
+              src = pkgs-final.fetchFromGitHub {
+                owner = "isri-aist";
+                repo = "h1_mj_description";
+                tag = "v1.1.0";
+                hash = "sha256-HmK5B4OmR+Eeyilq6yN4FakIIQXPucC12UACFQMPEoU=";
+              };
+            };
             mc-state-observation = { pkgs-final, drv-prev, ... }: {
               src = inputs.mc-state-observation;
               buildInputs = (drv-prev.buildInputs or [ ]) ++ [ pkgs-final.jrl-cmakemodules ];
@@ -122,7 +131,7 @@
                 mc-joystick-plugin,
                 onnxruntime,
               }:
-              mkMcRtcController rec {
+              mkMcRtcController {
                 pname = "rl-controller";
                 version = "0.0.0";
 
@@ -158,6 +167,7 @@
                   controller = {
                     Enabled = "RLController";
                     MainRobot = "H1";
+                    Timestep = 0.002;
                   };
                   robots = [
                     "mc-h1"
@@ -166,26 +176,21 @@
                     plugins = [
                       "mc-joystick-plugin"
                     ];
-                    # robots = [
-                    #   "mc-hrp4"
-                    #   "mc-hrp2"
-                    #   "mc-hrp5-p"
-                    #   "mc-hrp4cr"
-                    #   # FIXME(mc-rhps1): too large for now
-                    #   # "mc-rhps1"
-                    # ];
                     apps = [
                       "mc-rtc-ticker"
                       "mc-rtc-magnum"
-                    ];
-                    # ++ lib.optional (!stdenv.hostPlatform.isDarwin) "mc-mujoco";
+                      "mc-rtc-rviz"
+                    ]
+                    ++ lib.optional (!stdenv.hostPlatform.isDarwin) "mc-mujoco";
                   };
                   runApps =
-                    # lib.optional (!stdenv.hostPlatform.isDarwin) "mc-mujoco" ++
-                    lib.optionals (stdenv.hostPlatform.isDarwin) [
-                      "mc-rtc-ticker"
-                      "mc-rtc-magnum"
-                    ];
+                    if (!stdenv.hostPlatform.isDarwin) then
+                      [ "mc-mujoco" ]
+                    else
+                      [
+                        "mc-rtc-ticker"
+                        "mc-rtc-magnum"
+                      ];
                 };
 
                 meta = with lib; {

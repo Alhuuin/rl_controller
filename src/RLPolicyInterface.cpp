@@ -3,9 +3,15 @@
 #include <cmath>
 #include <filesystem>
 
-RLPolicyInterface::RLPolicyInterface(const std::string & policyPath)
-: inputSize_(0), outputSize_(0), inputIs2D_(false), outputIs2D_(false), isLoaded_(false), policyPath_(policyPath)
+namespace fs = std::filesystem;
+
+RLPolicyInterface::RLPolicyInterface(const std::string & policyDir, const std::string & policyPath)
+: inputSize_(0), outputSize_(0), inputIs2D_(false), outputIs2D_(false), isLoaded_(false), policyDir_(policyDir), policyPath_(policyPath)
 {
+  if(!fs::exists(policyDir))
+  {
+    mc_rtc::log::error_and_throw("Policy directory does not exist or is not readable: {}", policyDir);
+  }
   loadPolicy(policyPath);
 }
 
@@ -13,8 +19,9 @@ RLPolicyInterface::~RLPolicyInterface()
 {
 }
 
-void RLPolicyInterface::loadPolicy(const std::string & path)
+void RLPolicyInterface::loadPolicy(const std::string & _path)
 {
+  auto path = (fs::path{policyDir_} / fs::path{_path}).string(); 
   mc_rtc::log::info("Loading RL policy from: {}", path);
 
   if(!(path.size() >= 5 && path.substr(path.size() - 5) == ".onnx"))
@@ -22,7 +29,7 @@ void RLPolicyInterface::loadPolicy(const std::string & path)
 
   try
   {
-    if(!std::filesystem::exists(path))
+    if(!fs::exists(path))
     {
       mc_rtc::log::error("Policy file does not exist: {}", path);
       isLoaded_ = false;

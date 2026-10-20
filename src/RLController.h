@@ -96,7 +96,8 @@ struct RLController_DLLAPI RLController : public mc_control::fsm::Controller
     Eigen::VectorXd kdBase_; // Base RL PD gains from config
 
     // RL
-    std::vector<std::string> policyPaths_;
+    std::string policyDir_; // base directory in which the policies are installed
+    std::vector<std::string> policyPaths_; // policy files within policyDir_
 
     // Joystick input handling
     std::vector<bool> directionButtons_ = std::vector<bool>(4, false); // Up, Down, Left, Right
