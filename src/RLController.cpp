@@ -27,11 +27,14 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
 
 bool RLController::run()
 {
-  // Test joystick inputs
-  if(datastore().has("Joystick::connected") && datastore().get<bool>("Joystick::connected"))
-    RLuseJoyStickInputs();
-  else
-    RLuseKeyboardInputs();
+  if(!useGUICommands_)
+  {
+    // Test joystick inputs
+    if(datastore().has("Joystick::connected") && datastore().get<bool>("Joystick::connected"))
+      RLuseJoyStickInputs();
+    else
+      RLuseKeyboardInputs();
+  }
 
   if(printLimits_) computeLimits();
   
@@ -268,7 +271,8 @@ void RLController::addLog()
 void RLController::addGui(const mc_rtc::Configuration & config)
 {
   gui()->addElement({"RLController", "Policy"},
-  mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL),
+    mc_rtc::gui::Checkbox("Use GUI Commands", [this]() { return useGUICommands_; }, [this]() { useGUICommands_ = !useGUICommands_; velCmdRL.setZero(); }),
+    mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL),
     mc_rtc::gui::NumberInput("Max X Y Vel via Joystick", maxVelCmd_),
     mc_rtc::gui::NumberInput("Max yaw via Joystick", maxYawCmd_),
     mc_rtc::gui::Label("Current policy", [this]() -> const std::string & 
