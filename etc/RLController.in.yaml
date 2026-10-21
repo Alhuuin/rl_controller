@@ -61,6 +61,7 @@ init: RL_State
 
 Plugins: [mc_joystick_plugin]
  
+policy_dir: "@ONNX_POLICY_DIR@"  # Directory where the RL policy files are located
 policy_path: ["standing_h1.onnx", "walking_better_h1.onnx"]  # Path to the RL policy file(s)
 default_policy_index: 1 # Index of the default policy to use
 policies:

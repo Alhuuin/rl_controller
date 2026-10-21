@@ -18,9 +18,10 @@ class RLPolicyInterface
 public:
   /**
    * @brief Construct with a policy file path
-   * @param policyPath Path to the policy file
+   * @param policyDir Directory where the policy files are installed 
+   * @param policyPath Name of the policy file *.onnx 
    */
-  RLPolicyInterface(const std::string & policyPath);
+  RLPolicyInterface(const std::string & policyDir, const std::string & policyPath);
   
   /**
    * @brief Destructor
@@ -59,6 +60,7 @@ private:
   bool outputIs2D_;   // true if output shape is [batch, action_size], false if [action_size]
   
   bool isLoaded_;
+  std::string policyDir_;
   std::string policyPath_;
   
   std::unique_ptr<Ort::Session> onnxSession_;

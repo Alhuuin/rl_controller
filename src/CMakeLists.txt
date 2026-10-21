@@ -1,7 +1,8 @@
 set(CONTROLLER_NAME RLController)
 
+message(STATUS "Looking for onnxruntime in: ${ONNXRUNTIME_ROOT}")
+
 # ---- ONNX Runtime (local vendored copy) ----
-set(ONNXRUNTIME_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime)
 set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
 set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
 

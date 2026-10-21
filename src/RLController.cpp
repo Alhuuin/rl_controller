@@ -27,11 +27,14 @@ RLController::RLController(mc_rbdyn::RobotModulePtr rm, double dt, const mc_rtc:
 
 bool RLController::run()
 {
-  // Test joystick inputs
-  if(datastore().has("Joystick::connected") && datastore().get<bool>("Joystick::connected"))
-    RLuseJoyStickInputs();
-  else
-    RLuseKeyboardInputs();
+  if(!useGUICommands_)
+  {
+    // Test joystick inputs
+    if(datastore().has("Joystick::connected") && datastore().get<bool>("Joystick::connected"))
+      RLuseJoyStickInputs();
+    else
+      RLuseKeyboardInputs();
+  }
 
   if(printLimits_) computeLimits();
   
@@ -102,10 +105,10 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
     [this](const mc_rbdyn::Robot & real_robot) {return createContactAnchor(real_robot);});
   
   //Initialize Constraints
-  selfCollisionConstraint->setCollisionsDampers(solver(), {1.2, 20.0});
+  selfCollisionConstraint->setCollisionsDampers(solver(), {1.2, 60.0});
   solver().removeConstraintSet(dynamicsConstraint);
   dynamicsConstraint = mc_rtc::unique_ptr<mc_solver::DynamicsConstraint>(
-    new mc_solver::DynamicsConstraint(robots(), 0, {diPercent_, dsPercent_, 0.0, 1.2, 100.0}, velPercent_, true));
+    new mc_solver::DynamicsConstraint(robots(), 0, {diPercent_, dsPercent_, 0.0, 1.2, 120.0}, velPercent_, true));
   solver().addConstraintSet(dynamicsConstraint);
 
   // Initialize Task
@@ -122,6 +125,14 @@ void RLController::initializeRobot(const mc_rtc::Configuration & config)
 void RLController::initializeRLPolicy(const mc_rtc::Configuration & config)
 {
   // load policy specific configuration
+  if(auto policyDir = config.find<std::string>("policy_dir"))
+  {
+    policyDir_ = *policyDir;
+  }
+  else
+  {
+    mc_rtc::log::error_and_throw("policy_dir not specified in configuration");
+  }
   policyPaths_ = config("policy_path", std::vector<std::string>{"walking_better_h1.onnx"});
   configRL(config);
   auto & real_robot = realRobot(robots()[0].name());
@@ -260,7 +271,8 @@ void RLController::addLog()
 void RLController::addGui(const mc_rtc::Configuration & config)
 {
   gui()->addElement({"RLController", "Policy"},
-  mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL),
+    mc_rtc::gui::Checkbox("Use GUI Commands", [this]() { return useGUICommands_; }, [this]() { useGUICommands_ = !useGUICommands_; velCmdRL.setZero(); }),
+    mc_rtc::gui::ArrayInput("Velocity Command RL", {"X", "Y", "Yaw"}, velCmdRL),
     mc_rtc::gui::NumberInput("Max X Y Vel via Joystick", maxVelCmd_),
     mc_rtc::gui::NumberInput("Max yaw via Joystick", maxYawCmd_),
     mc_rtc::gui::Label("Current policy", [this]() -> const std::string & 
@@ -335,7 +347,7 @@ void RLController::configRL(const mc_rtc::Configuration & config)
 {
   mc_rtc::log::info("Loading RL policy [{}]: {}", currentPolicyIndex, policyPaths_[currentPolicyIndex]);
   try {
-    rlPolicy = std::make_unique<RLPolicyInterface>(policyPaths_[currentPolicyIndex]);
+    rlPolicy = std::make_unique<RLPolicyInterface>(policyDir_, policyPaths_[currentPolicyIndex]);
     if(rlPolicy) {
       mc_rtc::log::success("RL policy loaded successfully");
       // Initialize observation vector with the correct size from the loaded policy
