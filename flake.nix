@@ -42,6 +42,11 @@
     tasks.url = "github:jrl-umi3218/Tasks";
     tasks.inputs.mc-rtc-nix.follows = "mc-rtc-nix";
 
+    # This is bastien's fork of mc_mujoco https://github.com/bastien-muraccioli/mc_mujoco/tree/main
+    # rebased on top of nix standalone pacakging branch
+    mc-mujoco.url = "github:arntanguy/mc_mujoco/pull/1/head";
+    mc-mujoco.inputs.mc-rtc-nix.follows = "mc-rtc-nix";
+
   };
 
   outputs =
@@ -77,6 +82,9 @@
             };
             mc-rtc = {
               src = inputs.mc-rtc;
+            };
+            mc-mujoco = {
+              src = inputs.mc-mujoco;
             };
             state-observation = {
               src = inputs.state-observation;

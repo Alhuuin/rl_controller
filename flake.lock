@@ -380,6 +380,37 @@
         "type": "github"
       }
     },
+    "mc-mujoco": {
+      "inputs": {
+        "flake-parts": [
+          "mc-mujoco",
+          "mc-rtc-nix",
+          "flake-parts"
+        ],
+        "mc-rtc-nix": [
+          "mc-rtc-nix"
+        ],
+        "systems": [
+          "mc-mujoco",
+          "mc-rtc-nix",
+          "systems"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792567156,
+        "narHash": "sha256-T1U/ZwAyDg4EgTkJaebVI+xbonVb7+5qFqdK1Haccj8=",
+        "owner": "arntanguy",
+        "repo": "mc_mujoco",
+        "rev": "b39c328ee216840b44d27dd80e5ca082b4b2eb63",
+        "type": "github"
+      },
+      "original": {
+        "owner": "arntanguy",
+        "ref": "pull/1/head",
+        "repo": "mc_mujoco",
+        "type": "github"
+      }
+    },
     "mc-rtc": {
       "inputs": {
         "ccache-trigger": [
@@ -631,6 +662,7 @@
           "flake-parts"
         ],
         "mc-joystick-plugin": "mc-joystick-plugin",
+        "mc-mujoco": "mc-mujoco",
         "mc-rtc": "mc-rtc",
         "mc-rtc-nix": "mc-rtc-nix",
         "mc-state-observation": "mc-state-observation",
